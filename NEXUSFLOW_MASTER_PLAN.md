@@ -215,16 +215,16 @@ services/                 감지 서비스
 
 # 1차 배포 체크리스트
 
-## 핵심 기능
-- [ ] 음성 입력 → AI 파이프라인 → 저장
-- [ ] 스크린샷 감지 → OCR → 플로팅 오버레이
+### 핵심 기능
+- [x] 음성 입력 → AI 파이프라인 → 저장
+- [x] 스크린샷 감지 → OCR → 플로팅 오버레이
 - [x] SMS 자동 감지 → 파이프라인
 - [x] 카카오톡 알림 감지 → 파이프라인
 - [x] 통화 녹음 감지 → STT → 파이프라인
 - [ ] Confidence Routing (HIGH 자동저장 / MID 플로팅 / LOW 검수)
 - [ ] Dictionary 학습 (3회 확인 → 자동 승격)
 
-## 화면
+### 화면
 - [x] 홈 화면 (4존 레이아웃)
 - [ ] 거래처 목록 화면
 - [ ] 거래처 상세 화면 (Health Score + 타임라인)
@@ -237,28 +237,28 @@ services/                 감지 서비스
 - [ ] 온보딩 (동의 → 모드선택 → 데이터가져오기)
 - [ ] 로그인 화면
 
-## 공통 컴포넌트
+### 공통 컴포넌트
 - [x] NexusflowFab (글로벌 FAB)
-- [ ] 플로팅 오버레이
+- [x] 플로팅 오버레이
 - [ ] Confidence 배지
 - [x] Health Score 위젯
 
-## Flow Core
+### Flow Core
 - [x] nexusflow_ai_service.dart
 - [x] nexusflow_pipeline.dart
 - [x] floating_overlay_service.dart
-- [ ] ocr_service.dart
+- [x] ocr_service.dart
 - [x] screenshot_detector_service.dart
 - [x] sms_detector_service.dart
 - [x] kakao_detector_service.dart
 - [x] call_detector_service.dart
 - [x] health_score_service.dart
 - [x] insight_engine.dart
-- [ ] secure_vault_service.dart
-- [ ] supabase_config.dart
-- [ ] industry_mode_service.dart
+- [x] secure_vault_service.dart
+- [x] supabase_config.dart
+- [x] industry_mode_service.dart
 
-## 인프라
+### 인프라
 - [x] Supabase nexusflow schema (19개 테이블)
 - [x] confidence_thresholds 테이블
 - [x] term_dictionary 167개 초기 데이터
@@ -267,7 +267,7 @@ services/                 감지 서비스
 - [ ] Android 권한 설정 완료
 - [ ] 앱 서명 설정
 
-## 런칭
+### 런칭
 - [ ] PRO Early Bird 이메일 수집 버튼
 - [ ] 1차 전체 기능 무료 오픈
 - [ ] Google Play 스토어 등록
