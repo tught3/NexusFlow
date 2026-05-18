@@ -16,6 +16,11 @@
 - Review / verification: default `gpt-5.3-codex-spark`; use `gpt-5.4-mini` for high-risk changes.
 - If the exact model cannot be selected in the current environment, keep the same role split and report the limitation.
 
+## Hard routing rule
+- For any non-trivial NexusFlow task, always run planner -> workers -> reviewer as separate steps before touching code.
+- A user-requested model does not override the repo routing for non-trivial work.
+- If a task is truly trivial enough to skip the split, say why it is trivial before editing.
+
 ## 프로젝트 정체성
 - NexusFlow는 단순 CRM, 메모앱, 회의록 앱, AI 챗봇이 아니다.
 - NexusFlow는 AI가 관계 데이터를 구조화하고, 누구를 왜 언제 만나야 하는지 추천하는 모바일 우선 AI Relationship Operating System이다.
