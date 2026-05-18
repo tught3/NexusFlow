@@ -1,4 +1,4 @@
-package com.example.nexusflow
+package com.nexusflow.app
 
 import io.flutter.embedding.android.FlutterActivity
 
