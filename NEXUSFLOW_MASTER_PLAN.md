@@ -241,7 +241,7 @@ services/                 감지 서비스
 - [x] NexusflowFab (글로벌 FAB)
 - [ ] 플로팅 오버레이
 - [ ] Confidence 배지
-- [ ] Health Score 위젯
+- [x] Health Score 위젯
 
 ## Flow Core
 - [x] nexusflow_ai_service.dart
@@ -252,8 +252,8 @@ services/                 감지 서비스
 - [x] sms_detector_service.dart
 - [x] kakao_detector_service.dart
 - [x] call_detector_service.dart
-- [ ] health_score_service.dart
-- [ ] insight_engine.dart
+- [x] health_score_service.dart
+- [x] insight_engine.dart
 - [ ] secure_vault_service.dart
 - [ ] supabase_config.dart
 - [ ] industry_mode_service.dart

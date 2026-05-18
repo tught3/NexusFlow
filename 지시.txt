@@ -1,287 +1,402 @@
-아래 3개 파일을 각각 만들어줘.
+아래 2개 파일을 덮어써줘 (기존 내용 완전 교체).
 
 === 파일 1 ===
-경로: E:\FluxStudio\NexusFlow\lib\services\sms_detector_service.dart
+경로: E:\FluxStudio\NexusFlow\lib\nexusflow_core\relationship\health_score_service.dart
 
-// SMS 자동 감지 서비스 - 거래처 번호 매칭 후 파이프라인 연결
-import 'package:flutter/services.dart';
+// Relationship Health Score 계산 서비스
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../providers/auth_provider.dart';
 
-class SmsDetectorService {
-  static const _channel = MethodChannel('nexusflow/sms');
-  static const _eventChannel = EventChannel('nexusflow/sms_events');
+class HealthScoreService {
+  HealthScoreService({required this.supabase, required this.userId});
 
-  static SmsDetectorService? _instance;
-  static SmsDetectorService get instance =>
-      _instance ??= SmsDetectorService._();
-  SmsDetectorService._();
+  final SupabaseClient supabase;
+  final String userId;
 
-  bool _isRunning = false;
-  bool get isRunning => _isRunning;
+  static const int _contactFrequencyMax = 25;
+  static const int _responseQualityMax = 25;
+  static const int _reliabilityMax = 20;
+  static const int _continuityMax = 20;
+  static const int _opportunityMax = 10;
 
-  /// 감지 시작
-  Future<void> start({
-    required List<String> knownPhoneNumbers,
-    required List<String> keywords,
+  Future<HealthScore> calculate(String accountId) async {
+    final now = DateTime.now();
+    final thirtyDaysAgo = now.subtract(const Duration(days: 30));
+
+    final contactFrequency = await _calcContactFrequency(
+      accountId: accountId, since: thirtyDaysAgo);
+    final responseQuality = await _calcResponseQuality(accountId: accountId);
+    final reliability = await _calcReliability(accountId: accountId);
+    final continuity = await _calcContinuity(accountId: accountId);
+    final opportunity = await _calcOpportunity(accountId: accountId);
+
+    final total = contactFrequency + responseQuality +
+        reliability + continuity + opportunity;
+    final grade = _gradeFromScore(total);
+
+    await supabase.schema('nexusflow').from('accounts').update({
+      'health_score': total,
+      'health_grade': grade,
+      'health_contact_score': contactFrequency,
+      'health_response_score': responseQuality,
+      'health_reliability_score': reliability,
+      'health_continuity_score': continuity,
+      'health_opportunity_score': opportunity,
+      'health_updated_at': now.toIso8601String(),
+    }).eq('id', accountId).eq('user_id', userId);
+
+    return HealthScore(
+      accountId: accountId,
+      total: total,
+      grade: grade,
+      contactFrequency: contactFrequency,
+      responseQuality: responseQuality,
+      reliability: reliability,
+      continuity: continuity,
+      opportunity: opportunity,
+      calculatedAt: now,
+    );
+  }
+
+  Future<void> recalculateAll() async {
+    final accounts = await supabase
+        .schema('nexusflow')
+        .from('accounts')
+        .select('id')
+        .eq('user_id', userId);
+    for (final account in accounts) {
+      await calculate(account['id'] as String);
+    }
+  }
+
+  Future<int> _calcContactFrequency({
+    required String accountId,
+    required DateTime since,
   }) async {
-    if (_isRunning) return;
-    try {
-      await _channel.invokeMethod('startSmsDetection', {
-        'knownPhoneNumbers': knownPhoneNumbers,
-        'keywords': keywords,
-      });
-      _isRunning = true;
-    } catch (_) {}
+    final result = await supabase
+        .schema('nexusflow')
+        .from('interaction_events')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('user_id', userId)
+        .gte('occurred_at', since.toIso8601String());
+    final count = (result as List).length;
+    if (count >= 4) return _contactFrequencyMax;
+    if (count >= 2) return 15;
+    if (count >= 1) return 8;
+    return 2;
   }
 
-  /// 감지 중지
-  Future<void> stop() async {
-    if (!_isRunning) return;
-    try {
-      await _channel.invokeMethod('stopSmsDetection');
-    } catch (_) {}
-    _isRunning = false;
+  Future<int> _calcResponseQuality({required String accountId}) async {
+    final signals = await supabase
+        .schema('nexusflow')
+        .from('active_signals')
+        .select('signal_type')
+        .eq('account_id', accountId)
+        .eq('user_id', userId)
+        .eq('is_active', true);
+    int score = 12;
+    for (final signal in signals) {
+      final type = signal['signal_type'] as String;
+      if (type == 'opportunity') score += 5;
+      if (type == 'risk') score -= 5;
+    }
+    return score.clamp(0, _responseQualityMax);
   }
 
-  /// SMS 감지 이벤트 스트림
-  /// 거래처 번호 또는 키워드 매칭된 SMS만 이벤트 발생
-  Stream<SmsDetectedEvent> get detectionStream {
-    return _eventChannel.receiveBroadcastStream().map((event) {
-      final map = Map<String, dynamic>.from(event as Map);
-      return SmsDetectedEvent(
-        sender: map['sender'] as String,
-        body: map['body'] as String,
-        matchedAccountId: map['matchedAccountId'] as String?,
-        matchedContactId: map['matchedContactId'] as String?,
-        matchedKeywords: List<String>.from(map['matchedKeywords'] as List),
-        receivedAt: DateTime.parse(map['receivedAt'] as String),
-      );
-    });
+  Future<int> _calcReliability({required String accountId}) async {
+    final allItems = await supabase
+        .schema('nexusflow')
+        .from('action_items')
+        .select('status')
+        .eq('account_id', accountId)
+        .eq('user_id', userId);
+    if ((allItems as List).isEmpty) return 10;
+    final doneCount = allItems.where((i) => i['status'] == 'done').length;
+    final rate = doneCount / allItems.length;
+    if (rate >= 0.8) return _reliabilityMax;
+    if (rate >= 0.5) return 12;
+    return 4;
   }
 
-  /// 알려진 전화번호 업데이트
-  Future<void> updatePhoneNumbers({
-    required List<String> phoneNumbers,
-  }) async {
-    try {
-      await _channel.invokeMethod('updatePhoneNumbers', {
-        'phoneNumbers': phoneNumbers,
-      });
-    } catch (_) {}
+  Future<int> _calcContinuity({required String accountId}) async {
+    final account = await supabase
+        .schema('nexusflow')
+        .from('accounts')
+        .select('created_at')
+        .eq('id', accountId)
+        .single();
+    final createdAt = DateTime.parse(account['created_at'] as String);
+    final days = DateTime.now().difference(createdAt).inDays;
+    if (days >= 365) return _continuityMax;
+    if (days >= 180) return 12;
+    return 8;
+  }
+
+  Future<int> _calcOpportunity({required String accountId}) async {
+    final opportunities = await supabase
+        .schema('nexusflow')
+        .from('active_signals')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('user_id', userId)
+        .eq('signal_type', 'opportunity')
+        .eq('is_active', true);
+    if ((opportunities as List).isNotEmpty) return _opportunityMax;
+    final risks = await supabase
+        .schema('nexusflow')
+        .from('active_signals')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('user_id', userId)
+        .eq('signal_type', 'risk')
+        .eq('is_active', true);
+    if ((risks as List).isNotEmpty) return 0;
+    return 5;
+  }
+
+  String _gradeFromScore(int score) {
+    if (score >= 80) return 'Strong';
+    if (score >= 60) return 'Stable';
+    if (score >= 40) return 'Warming';
+    if (score >= 20) return 'AtRisk';
+    return 'Critical';
   }
 }
 
-class SmsDetectedEvent {
-  const SmsDetectedEvent({
-    required this.sender,
-    required this.body,
-    this.matchedAccountId,
-    this.matchedContactId,
-    required this.matchedKeywords,
-    required this.receivedAt,
+class HealthScore {
+  const HealthScore({
+    required this.accountId,
+    required this.total,
+    required this.grade,
+    required this.contactFrequency,
+    required this.responseQuality,
+    required this.reliability,
+    required this.continuity,
+    required this.opportunity,
+    required this.calculatedAt,
   });
 
-  final String sender;
-  final String body;
-  final String? matchedAccountId;
-  final String? matchedContactId;
-  final List<String> matchedKeywords;
-  final DateTime receivedAt;
+  final String accountId;
+  final int total;
+  final String grade;
+  final int contactFrequency;
+  final int responseQuality;
+  final int reliability;
+  final int continuity;
+  final int opportunity;
+  final DateTime calculatedAt;
+
+  Color get gradeColor {
+    switch (grade) {
+      case 'Strong': return const Color(0xFF16A34A);
+      case 'Stable': return const Color(0xFF2563EB);
+      case 'Warming': return const Color(0xFFF59E0B);
+      case 'AtRisk': return const Color(0xFFEA580C);
+      default: return const Color(0xFFDC2626);
+    }
+  }
+
+  String get gradeLabel {
+    switch (grade) {
+      case 'Strong': return '🟢 Strong';
+      case 'Stable': return '🔵 Stable';
+      case 'Warming': return '🟡 Warming';
+      case 'AtRisk': return '🟠 At Risk';
+      default: return '🔴 Critical';
+    }
+  }
 }
 
-final smsDetectorProvider = Provider<SmsDetectorService>((ref) {
-  return SmsDetectorService.instance;
+final healthScoreServiceProvider = Provider<HealthScoreService?>((ref) {
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) return null;
+  return HealthScoreService(
+    supabase: Supabase.instance.client,
+    userId: userId,
+  );
 });
 
 
 === 파일 2 ===
-경로: E:\FluxStudio\NexusFlow\lib\services\kakao_detector_service.dart
+경로: E:\FluxStudio\NexusFlow\lib\nexusflow_core\insights\insight_engine.dart
 
-// 카카오톡 알림 감지 서비스 - Notification Listener API 활용
-import 'package:flutter/services.dart';
+// 인사이트 엔진 - 관계 데이터 기반 인사이트 자동 생성
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../providers/auth_provider.dart';
 
-class KakaoDetectorService {
-  static const _channel = MethodChannel('nexusflow/kakao');
-  static const _eventChannel = EventChannel('nexusflow/kakao_events');
+class InsightEngine {
+  InsightEngine({required this.supabase, required this.userId});
 
-  static KakaoDetectorService? _instance;
-  static KakaoDetectorService get instance =>
-      _instance ??= KakaoDetectorService._();
-  KakaoDetectorService._();
+  final SupabaseClient supabase;
+  final String userId;
 
-  bool _isRunning = false;
-  bool get isRunning => _isRunning;
-
-  /// Notification Listener 권한 확인
-  Future<bool> hasPermission() async {
-    try {
-      final result =
-          await _channel.invokeMethod<bool>('hasNotificationPermission');
-      return result ?? false;
-    } catch (_) {
-      return false;
+  Future<List<InsightResult>> generateAll() async {
+    final insights = <InsightResult>[];
+    insights.addAll(await _checkFollowUpDelays());
+    insights.addAll(await _checkOpportunitySignals());
+    insights.addAll(await _checkRiskSignals());
+    insights.addAll(await _checkLongNoContact());
+    insights.addAll(await _checkVisitTiming());
+    final filtered = await _filterSuppressed(insights);
+    for (final insight in filtered) {
+      await _saveInsight(insight);
     }
+    return filtered;
   }
 
-  /// 권한 요청 (설정 화면으로 이동)
-  Future<void> requestPermission() async {
-    try {
-      await _channel.invokeMethod('requestNotificationPermission');
-    } catch (_) {}
+  Future<List<InsightResult>> _checkFollowUpDelays() async {
+    final overdueItems = await supabase
+        .schema('nexusflow')
+        .from('action_items')
+        .select('id, content, due_date, account_id')
+        .eq('user_id', userId)
+        .eq('status', 'pending')
+        .lt('due_date', DateTime.now().toIso8601String());
+    return (overdueItems as List).map((item) => InsightResult(
+      accountId: item['account_id'] as String?,
+      insightType: 'today_action',
+      content: 'follow-up 기한이 지났어요: ${item['content']}',
+      priorityScore: 1.5,
+    )).toList();
   }
 
-  /// 감지 시작
-  Future<void> start({
-    required List<String> knownContactNames,
-    required List<String> keywords,
-  }) async {
-    if (_isRunning) return;
-    try {
-      await _channel.invokeMethod('startKakaoDetection', {
-        'knownContactNames': knownContactNames,
-        'keywords': keywords,
-      });
-      _isRunning = true;
-    } catch (_) {}
+  Future<List<InsightResult>> _checkOpportunitySignals() async {
+    final signals = await supabase
+        .schema('nexusflow')
+        .from('active_signals')
+        .select('account_id, signal_content')
+        .eq('user_id', userId)
+        .eq('signal_type', 'opportunity')
+        .eq('is_active', true);
+    return (signals as List).map((s) => InsightResult(
+      accountId: s['account_id'] as String?,
+      insightType: 'opportunity',
+      content: s['signal_content'] as String,
+      priorityScore: 1.3,
+    )).toList();
   }
 
-  /// 감지 중지
-  Future<void> stop() async {
-    if (!_isRunning) return;
-    try {
-      await _channel.invokeMethod('stopKakaoDetection');
-    } catch (_) {}
-    _isRunning = false;
+  Future<List<InsightResult>> _checkRiskSignals() async {
+    final signals = await supabase
+        .schema('nexusflow')
+        .from('active_signals')
+        .select('account_id, signal_content')
+        .eq('user_id', userId)
+        .eq('signal_type', 'risk')
+        .eq('is_active', true);
+    return (signals as List).map((s) => InsightResult(
+      accountId: s['account_id'] as String?,
+      insightType: 'risk',
+      content: s['signal_content'] as String,
+      priorityScore: 1.4,
+    )).toList();
   }
 
-  /// 카카오톡 알림 감지 이벤트 스트림
-  /// 거래처/담당자명 또는 키워드 매칭된 알림만 이벤트 발생
-  Stream<KakaoDetectedEvent> get detectionStream {
-    return _eventChannel.receiveBroadcastStream().map((event) {
-      final map = Map<String, dynamic>.from(event as Map);
-      return KakaoDetectedEvent(
-        sender: map['sender'] as String,
-        message: map['message'] as String,
-        matchedContactId: map['matchedContactId'] as String?,
-        matchedKeywords: List<String>.from(map['matchedKeywords'] as List),
-        receivedAt: DateTime.parse(map['receivedAt'] as String),
+  Future<List<InsightResult>> _checkLongNoContact() async {
+    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    final accounts = await supabase
+        .schema('nexusflow')
+        .from('accounts')
+        .select('id, name, last_contacted_at')
+        .eq('user_id', userId)
+        .lt('last_contacted_at', cutoff.toIso8601String())
+        .lte('priority', 2);
+    return (accounts as List).map((a) {
+      final lastContact = DateTime.parse(a['last_contacted_at'] as String);
+      final days = DateTime.now().difference(lastContact).inDays;
+      return InsightResult(
+        accountId: a['id'] as String?,
+        insightType: 'risk',
+        content: '${a['name']} - ${days}일간 접촉이 없었어요.',
+        priorityScore: 1.2,
       );
+    }).toList();
+  }
+
+  Future<List<InsightResult>> _checkVisitTiming() async {
+    final today = DateTime.now().weekday;
+    final slots = await supabase
+        .schema('nexusflow')
+        .from('contact_availability_slots')
+        .select('contact_id, time_slot')
+        .eq('day_of_week', today)
+        .eq('is_available', true);
+    return (slots as List).map((_) => InsightResult(
+      accountId: null,
+      insightType: 'visit_timing',
+      content: '오늘 방문 가능한 담당자가 있어요.',
+      priorityScore: 1.1,
+    )).toList();
+  }
+
+  Future<List<InsightResult>> _filterSuppressed(
+      List<InsightResult> insights) async {
+    final suppressed = await supabase
+        .schema('nexusflow')
+        .from('insights')
+        .select('content')
+        .eq('user_id', userId)
+        .not('suppressed_until', 'is', null)
+        .gt('suppressed_until', DateTime.now().toIso8601String());
+    final suppressedContents =
+        (suppressed as List).map((s) => s['content'] as String).toSet();
+    return insights
+        .where((i) => !suppressedContents.contains(i.content))
+        .toList();
+  }
+
+  Future<void> _saveInsight(InsightResult insight) async {
+    final existing = await supabase
+        .schema('nexusflow')
+        .from('insights')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('content', insight.content)
+        .gte('created_at',
+            DateTime.now()
+                .subtract(const Duration(hours: 24))
+                .toIso8601String())
+        .maybeSingle();
+    if (existing != null) return;
+    await supabase.schema('nexusflow').from('insights').insert({
+      'user_id': userId,
+      'account_id': insight.accountId,
+      'insight_type': insight.insightType,
+      'content': insight.content,
+      'status': 'new',
+      'priority_score': insight.priorityScore,
+      'expires_at': DateTime.now()
+          .add(const Duration(days: 7))
+          .toIso8601String(),
     });
   }
 }
 
-class KakaoDetectedEvent {
-  const KakaoDetectedEvent({
-    required this.sender,
-    required this.message,
-    this.matchedContactId,
-    required this.matchedKeywords,
-    required this.receivedAt,
+class InsightResult {
+  const InsightResult({
+    required this.accountId,
+    required this.insightType,
+    required this.content,
+    required this.priorityScore,
   });
 
-  final String sender;
-  final String message;
-  final String? matchedContactId;
-  final List<String> matchedKeywords;
-  final DateTime receivedAt;
+  final String? accountId;
+  final String insightType;
+  final String content;
+  final double priorityScore;
 }
 
-final kakaoDetectorProvider = Provider<KakaoDetectorService>((ref) {
-  return KakaoDetectorService.instance;
-});
-
-
-=== 파일 3 ===
-경로: E:\FluxStudio\NexusFlow\lib\services\call_detector_service.dart
-
-// 통화 종료 감지 서비스 - 통화 후 녹음 파일 분석 연결
-import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-class CallDetectorService {
-  static const _channel = MethodChannel('nexusflow/call');
-  static const _eventChannel = EventChannel('nexusflow/call_events');
-
-  static CallDetectorService? _instance;
-  static CallDetectorService get instance =>
-      _instance ??= CallDetectorService._();
-  CallDetectorService._();
-
-  bool _isRunning = false;
-  bool get isRunning => _isRunning;
-
-  /// 감지 시작
-  Future<void> start({
-    required List<String> knownPhoneNumbers,
-  }) async {
-    if (_isRunning) return;
-    try {
-      await _channel.invokeMethod('startCallDetection', {
-        'knownPhoneNumbers': knownPhoneNumbers,
-      });
-      _isRunning = true;
-    } catch (_) {}
-  }
-
-  /// 감지 중지
-  Future<void> stop() async {
-    if (!_isRunning) return;
-    try {
-      await _channel.invokeMethod('stopCallDetection');
-    } catch (_) {}
-    _isRunning = false;
-  }
-
-  /// 통화 종료 이벤트 스트림
-  Stream<CallEndedEvent> get detectionStream {
-    return _eventChannel.receiveBroadcastStream().map((event) {
-      final map = Map<String, dynamic>.from(event as Map);
-      return CallEndedEvent(
-        phoneNumber: map['phoneNumber'] as String,
-        duration: Duration(seconds: map['durationSeconds'] as int),
-        recordingFilePath: map['recordingFilePath'] as String?,
-        matchedAccountId: map['matchedAccountId'] as String?,
-        matchedContactId: map['matchedContactId'] as String?,
-        endedAt: DateTime.parse(map['endedAt'] as String),
-      );
-    });
-  }
-
-  /// 녹음 파일 STT 변환 요청
-  Future<String?> transcribeRecording(String filePath) async {
-    try {
-      final result = await _channel.invokeMethod<String>(
-        'transcribeRecording',
-        {'filePath': filePath},
-      );
-      return result;
-    } catch (_) {
-      return null;
-    }
-  }
-}
-
-class CallEndedEvent {
-  const CallEndedEvent({
-    required this.phoneNumber,
-    required this.duration,
-    this.recordingFilePath,
-    this.matchedAccountId,
-    this.matchedContactId,
-    required this.endedAt,
-  });
-
-  final String phoneNumber;
-  final Duration duration;
-  final String? recordingFilePath;
-  final String? matchedAccountId;
-  final String? matchedContactId;
-  final DateTime endedAt;
-}
-
-final callDetectorProvider = Provider<CallDetectorService>((ref) {
-  return CallDetectorService.instance;
+final insightEngineProvider = Provider<InsightEngine?>((ref) {
+  final userId = ref.watch(currentUserIdProvider);
+  if (userId == null) return null;
+  return InsightEngine(
+    supabase: Supabase.instance.client,
+    userId: userId,
+  );
 });
 
 완료되면 파일별 줄 수와 MASTER_PLAN 업데이트 여부 알려줘.
