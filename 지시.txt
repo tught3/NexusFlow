@@ -1,224 +1,34 @@
 아래 3개 파일을 각각 만들어줘.
 
 === 파일 1 ===
-경로: E:\FluxStudio\NexusFlow\lib\widgets\nexusflow_fab.dart
+경로: E:\FluxStudio\NexusFlow\lib\services\sms_detector_service.dart
 
-// NexusFlow 글로벌 FAB - 모든 화면에서 음성입력/AI검색 접근
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-
-class NexusflowFab extends ConsumerStatefulWidget {
-  const NexusflowFab({super.key});
-
-  @override
-  ConsumerState<NexusflowFab> createState() => _NexusflowFabState();
-}
-
-class _NexusflowFabState extends ConsumerState<NexusflowFab>
-    with SingleTickerProviderStateMixin {
-  bool _isExpanded = false;
-  late AnimationController _controller;
-  late Animation<double> _expandAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-    _expandAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeInOut,
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _toggle() {
-    setState(() {
-      _isExpanded = !_isExpanded;
-      if (_isExpanded) {
-        _controller.forward();
-      } else {
-        _controller.reverse();
-      }
-    });
-  }
-
-  void _onVoiceInput() {
-    _toggle();
-    context.push('/record?mode=voice');
-  }
-
-  void _onAiSearch() {
-    _toggle();
-    context.push('/record?mode=ai');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        // 음성 입력 버튼
-        ScaleTransition(
-          scale: _expandAnimation,
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: FloatingActionButton.small(
-              heroTag: 'fab_voice',
-              backgroundColor: const Color(0xFF2563EB),
-              onPressed: _onVoiceInput,
-              child: const Icon(Icons.mic, color: Colors.white, size: 20),
-            ),
-          ),
-        ),
-        // AI 검색 버튼
-        ScaleTransition(
-          scale: _expandAnimation,
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: FloatingActionButton.small(
-              heroTag: 'fab_ai',
-              backgroundColor: const Color(0xFF06B6D4),
-              onPressed: _onAiSearch,
-              child: const Icon(Icons.auto_awesome,
-                  color: Colors.white, size: 20),
-            ),
-          ),
-        ),
-        // 메인 FAB
-        FloatingActionButton(
-          heroTag: 'fab_main',
-          backgroundColor: const Color(0xFF16213E),
-          onPressed: _toggle,
-          child: AnimatedRotation(
-            turns: _isExpanded ? 0.125 : 0,
-            duration: const Duration(milliseconds: 200),
-            child: const Icon(Icons.add, color: Colors.white),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-
-=== 파일 2 ===
-경로: E:\FluxStudio\NexusFlow\lib\flow_core\overlay\floating_overlay_service.dart
-
-// 플로팅 오버레이 서비스 - 스크린샷/SMS 감지 시 다른 앱 위에 표시
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
-class FloatingOverlayService {
-  static const _channel = MethodChannel('nexusflow/overlay');
-
-  static FloatingOverlayService? _instance;
-  static FloatingOverlayService get instance =>
-      _instance ??= FloatingOverlayService._();
-  FloatingOverlayService._();
-
-  bool _isShowing = false;
-  bool get isShowing => _isShowing;
-
-  /// 오버레이 권한 확인
-  Future<bool> hasPermission() async {
-    try {
-      final result = await _channel.invokeMethod<bool>('hasOverlayPermission');
-      return result ?? false;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// 오버레이 권한 요청 (설정 화면으로 이동)
-  Future<void> requestPermission() async {
-    try {
-      await _channel.invokeMethod('requestOverlayPermission');
-    } catch (_) {}
-  }
-
-  /// 플로팅 오버레이 표시
-  /// [title] 오버레이 제목
-  /// [extractedData] AI 추출 결과 (null이면 분석 중 상태)
-  Future<void> show({
-    required String title,
-    required String sourceType,
-    Map<String, dynamic>? extractedData,
-    Function(Map<String, dynamic>)? onSave,
-    VoidCallback? onDismiss,
-  }) async {
-    if (_isShowing) return;
-    _isShowing = true;
-
-    try {
-      await _channel.invokeMethod('showOverlay', {
-        'title': title,
-        'sourceType': sourceType,
-        'extractedData': extractedData,
-      });
-    } catch (_) {
-      _isShowing = false;
-    }
-  }
-
-  /// 플로팅 오버레이 숨기기
-  Future<void> hide() async {
-    if (!_isShowing) return;
-    try {
-      await _channel.invokeMethod('hideOverlay');
-    } catch (_) {}
-    _isShowing = false;
-  }
-
-  /// 오버레이 결과 스트림 수신
-  Stream<Map<String, dynamic>> get overlayResults {
-    return const EventChannel('nexusflow/overlay_results')
-        .receiveBroadcastStream()
-        .map((event) => Map<String, dynamic>.from(event as Map));
-  }
-}
-
-
-=== 파일 3 ===
-경로: E:\FluxStudio\NexusFlow\lib\flow_core\ocr\screenshot_detector_service.dart
-
-// 스크린샷 감지 서비스 - MediaStore 변경 감지 후 관련성 판별
+// SMS 자동 감지 서비스 - 거래처 번호 매칭 후 파이프라인 연결
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class ScreenshotDetectorService {
-  static const _channel = MethodChannel('nexusflow/screenshot');
-  static const _eventChannel = EventChannel('nexusflow/screenshot_events');
+class SmsDetectorService {
+  static const _channel = MethodChannel('nexusflow/sms');
+  static const _eventChannel = EventChannel('nexusflow/sms_events');
 
-  static ScreenshotDetectorService? _instance;
-  static ScreenshotDetectorService get instance =>
-      _instance ??= ScreenshotDetectorService._();
-  ScreenshotDetectorService._();
+  static SmsDetectorService? _instance;
+  static SmsDetectorService get instance =>
+      _instance ??= SmsDetectorService._();
+  SmsDetectorService._();
 
   bool _isRunning = false;
   bool get isRunning => _isRunning;
 
   /// 감지 시작
   Future<void> start({
+    required List<String> knownPhoneNumbers,
     required List<String> keywords,
-    required List<String> accountNames,
-    required List<String> contactNames,
   }) async {
     if (_isRunning) return;
     try {
-      await _channel.invokeMethod('startDetection', {
+      await _channel.invokeMethod('startSmsDetection', {
+        'knownPhoneNumbers': knownPhoneNumbers,
         'keywords': keywords,
-        'accountNames': accountNames,
-        'contactNames': contactNames,
       });
       _isRunning = true;
     } catch (_) {}
@@ -228,58 +38,250 @@ class ScreenshotDetectorService {
   Future<void> stop() async {
     if (!_isRunning) return;
     try {
-      await _channel.invokeMethod('stopDetection');
+      await _channel.invokeMethod('stopSmsDetection');
     } catch (_) {}
     _isRunning = false;
   }
 
-  /// 스크린샷 감지 이벤트 스트림
-  /// 관련성 있는 스크린샷만 이벤트 발생
-  Stream<ScreenshotDetectedEvent> get detectionStream {
+  /// SMS 감지 이벤트 스트림
+  /// 거래처 번호 또는 키워드 매칭된 SMS만 이벤트 발생
+  Stream<SmsDetectedEvent> get detectionStream {
     return _eventChannel.receiveBroadcastStream().map((event) {
       final map = Map<String, dynamic>.from(event as Map);
-      return ScreenshotDetectedEvent(
-        imagePath: map['imagePath'] as String,
-        ocrText: map['ocrText'] as String,
+      return SmsDetectedEvent(
+        sender: map['sender'] as String,
+        body: map['body'] as String,
+        matchedAccountId: map['matchedAccountId'] as String?,
+        matchedContactId: map['matchedContactId'] as String?,
         matchedKeywords: List<String>.from(map['matchedKeywords'] as List),
-        detectedAt: DateTime.parse(map['detectedAt'] as String),
+        receivedAt: DateTime.parse(map['receivedAt'] as String),
       );
     });
   }
 
-  /// 키워드 업데이트 (거래처/담당자 추가 시)
-  Future<void> updateKeywords({
-    required List<String> keywords,
-    required List<String> accountNames,
-    required List<String> contactNames,
+  /// 알려진 전화번호 업데이트
+  Future<void> updatePhoneNumbers({
+    required List<String> phoneNumbers,
   }) async {
     try {
-      await _channel.invokeMethod('updateKeywords', {
-        'keywords': keywords,
-        'accountNames': accountNames,
-        'contactNames': contactNames,
+      await _channel.invokeMethod('updatePhoneNumbers', {
+        'phoneNumbers': phoneNumbers,
       });
     } catch (_) {}
   }
 }
 
-class ScreenshotDetectedEvent {
-  const ScreenshotDetectedEvent({
-    required this.imagePath,
-    required this.ocrText,
+class SmsDetectedEvent {
+  const SmsDetectedEvent({
+    required this.sender,
+    required this.body,
+    this.matchedAccountId,
+    this.matchedContactId,
     required this.matchedKeywords,
-    required this.detectedAt,
+    required this.receivedAt,
   });
 
-  final String imagePath;
-  final String ocrText;
+  final String sender;
+  final String body;
+  final String? matchedAccountId;
+  final String? matchedContactId;
   final List<String> matchedKeywords;
-  final DateTime detectedAt;
+  final DateTime receivedAt;
 }
 
-final screenshotDetectorProvider =
-    Provider<ScreenshotDetectorService>((ref) {
-  return ScreenshotDetectorService.instance;
+final smsDetectorProvider = Provider<SmsDetectorService>((ref) {
+  return SmsDetectorService.instance;
+});
+
+
+=== 파일 2 ===
+경로: E:\FluxStudio\NexusFlow\lib\services\kakao_detector_service.dart
+
+// 카카오톡 알림 감지 서비스 - Notification Listener API 활용
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+class KakaoDetectorService {
+  static const _channel = MethodChannel('nexusflow/kakao');
+  static const _eventChannel = EventChannel('nexusflow/kakao_events');
+
+  static KakaoDetectorService? _instance;
+  static KakaoDetectorService get instance =>
+      _instance ??= KakaoDetectorService._();
+  KakaoDetectorService._();
+
+  bool _isRunning = false;
+  bool get isRunning => _isRunning;
+
+  /// Notification Listener 권한 확인
+  Future<bool> hasPermission() async {
+    try {
+      final result =
+          await _channel.invokeMethod<bool>('hasNotificationPermission');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 권한 요청 (설정 화면으로 이동)
+  Future<void> requestPermission() async {
+    try {
+      await _channel.invokeMethod('requestNotificationPermission');
+    } catch (_) {}
+  }
+
+  /// 감지 시작
+  Future<void> start({
+    required List<String> knownContactNames,
+    required List<String> keywords,
+  }) async {
+    if (_isRunning) return;
+    try {
+      await _channel.invokeMethod('startKakaoDetection', {
+        'knownContactNames': knownContactNames,
+        'keywords': keywords,
+      });
+      _isRunning = true;
+    } catch (_) {}
+  }
+
+  /// 감지 중지
+  Future<void> stop() async {
+    if (!_isRunning) return;
+    try {
+      await _channel.invokeMethod('stopKakaoDetection');
+    } catch (_) {}
+    _isRunning = false;
+  }
+
+  /// 카카오톡 알림 감지 이벤트 스트림
+  /// 거래처/담당자명 또는 키워드 매칭된 알림만 이벤트 발생
+  Stream<KakaoDetectedEvent> get detectionStream {
+    return _eventChannel.receiveBroadcastStream().map((event) {
+      final map = Map<String, dynamic>.from(event as Map);
+      return KakaoDetectedEvent(
+        sender: map['sender'] as String,
+        message: map['message'] as String,
+        matchedContactId: map['matchedContactId'] as String?,
+        matchedKeywords: List<String>.from(map['matchedKeywords'] as List),
+        receivedAt: DateTime.parse(map['receivedAt'] as String),
+      );
+    });
+  }
+}
+
+class KakaoDetectedEvent {
+  const KakaoDetectedEvent({
+    required this.sender,
+    required this.message,
+    this.matchedContactId,
+    required this.matchedKeywords,
+    required this.receivedAt,
+  });
+
+  final String sender;
+  final String message;
+  final String? matchedContactId;
+  final List<String> matchedKeywords;
+  final DateTime receivedAt;
+}
+
+final kakaoDetectorProvider = Provider<KakaoDetectorService>((ref) {
+  return KakaoDetectorService.instance;
+});
+
+
+=== 파일 3 ===
+경로: E:\FluxStudio\NexusFlow\lib\services\call_detector_service.dart
+
+// 통화 종료 감지 서비스 - 통화 후 녹음 파일 분석 연결
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+class CallDetectorService {
+  static const _channel = MethodChannel('nexusflow/call');
+  static const _eventChannel = EventChannel('nexusflow/call_events');
+
+  static CallDetectorService? _instance;
+  static CallDetectorService get instance =>
+      _instance ??= CallDetectorService._();
+  CallDetectorService._();
+
+  bool _isRunning = false;
+  bool get isRunning => _isRunning;
+
+  /// 감지 시작
+  Future<void> start({
+    required List<String> knownPhoneNumbers,
+  }) async {
+    if (_isRunning) return;
+    try {
+      await _channel.invokeMethod('startCallDetection', {
+        'knownPhoneNumbers': knownPhoneNumbers,
+      });
+      _isRunning = true;
+    } catch (_) {}
+  }
+
+  /// 감지 중지
+  Future<void> stop() async {
+    if (!_isRunning) return;
+    try {
+      await _channel.invokeMethod('stopCallDetection');
+    } catch (_) {}
+    _isRunning = false;
+  }
+
+  /// 통화 종료 이벤트 스트림
+  Stream<CallEndedEvent> get detectionStream {
+    return _eventChannel.receiveBroadcastStream().map((event) {
+      final map = Map<String, dynamic>.from(event as Map);
+      return CallEndedEvent(
+        phoneNumber: map['phoneNumber'] as String,
+        duration: Duration(seconds: map['durationSeconds'] as int),
+        recordingFilePath: map['recordingFilePath'] as String?,
+        matchedAccountId: map['matchedAccountId'] as String?,
+        matchedContactId: map['matchedContactId'] as String?,
+        endedAt: DateTime.parse(map['endedAt'] as String),
+      );
+    });
+  }
+
+  /// 녹음 파일 STT 변환 요청
+  Future<String?> transcribeRecording(String filePath) async {
+    try {
+      final result = await _channel.invokeMethod<String>(
+        'transcribeRecording',
+        {'filePath': filePath},
+      );
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class CallEndedEvent {
+  const CallEndedEvent({
+    required this.phoneNumber,
+    required this.duration,
+    this.recordingFilePath,
+    this.matchedAccountId,
+    this.matchedContactId,
+    required this.endedAt,
+  });
+
+  final String phoneNumber;
+  final Duration duration;
+  final String? recordingFilePath;
+  final String? matchedAccountId;
+  final String? matchedContactId;
+  final DateTime endedAt;
+}
+
+final callDetectorProvider = Provider<CallDetectorService>((ref) {
+  return CallDetectorService.instance;
 });
 
 완료되면 파일별 줄 수와 MASTER_PLAN 업데이트 여부 알려줘.

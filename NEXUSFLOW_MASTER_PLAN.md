@@ -218,9 +218,9 @@ services/                 감지 서비스
 ## 핵심 기능
 - [ ] 음성 입력 → AI 파이프라인 → 저장
 - [ ] 스크린샷 감지 → OCR → 플로팅 오버레이
-- [ ] SMS 자동 감지 → 파이프라인
-- [ ] 카카오톡 알림 감지 → 파이프라인
-- [ ] 통화 녹음 감지 → STT → 파이프라인
+- [x] SMS 자동 감지 → 파이프라인
+- [x] 카카오톡 알림 감지 → 파이프라인
+- [x] 통화 녹음 감지 → STT → 파이프라인
 - [ ] Confidence Routing (HIGH 자동저장 / MID 플로팅 / LOW 검수)
 - [ ] Dictionary 학습 (3회 확인 → 자동 승격)
 
@@ -249,9 +249,9 @@ services/                 감지 서비스
 - [x] floating_overlay_service.dart
 - [ ] ocr_service.dart
 - [x] screenshot_detector_service.dart
-- [ ] sms_detector_service.dart
-- [ ] kakao_detector_service.dart
-- [ ] call_detector_service.dart
+- [x] sms_detector_service.dart
+- [x] kakao_detector_service.dart
+- [x] call_detector_service.dart
 - [ ] health_score_service.dart
 - [ ] insight_engine.dart
 - [ ] secure_vault_service.dart
