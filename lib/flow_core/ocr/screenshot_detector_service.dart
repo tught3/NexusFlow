@@ -1,0 +1,3 @@
+class ScreenshotDetectorService {
+  // TODO: implement
+}

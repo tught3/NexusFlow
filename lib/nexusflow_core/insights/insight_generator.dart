@@ -1,0 +1,3 @@
+class InsightGenerator {
+  // TODO: implement
+}

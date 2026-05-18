@@ -1,0 +1,3 @@
+class IndustryTag {
+  // TODO: implement
+}

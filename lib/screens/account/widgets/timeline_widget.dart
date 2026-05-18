@@ -1,0 +1,3 @@
+class TimelineWidget {
+  // TODO: implement
+}

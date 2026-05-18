@@ -1,0 +1,3 @@
+class FloatingOverlayService {
+  // TODO: implement
+}

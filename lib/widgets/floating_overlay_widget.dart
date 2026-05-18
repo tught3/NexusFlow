@@ -1,0 +1,3 @@
+class FloatingOverlayWidget {
+  // TODO: implement
+}

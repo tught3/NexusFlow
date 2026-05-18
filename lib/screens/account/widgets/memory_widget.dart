@@ -1,0 +1,3 @@
+class MemoryWidget {
+  // TODO: implement
+}

@@ -1,0 +1,3 @@
+class ConsentScreen {
+  // TODO: implement
+}

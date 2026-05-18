@@ -1,0 +1,3 @@
+class InsightListScreen {
+  // TODO: implement
+}

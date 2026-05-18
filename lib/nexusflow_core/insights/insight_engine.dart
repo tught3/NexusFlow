@@ -1,0 +1,3 @@
+class InsightEngine {
+  // TODO: implement
+}

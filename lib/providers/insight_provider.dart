@@ -1,0 +1,3 @@
+class InsightProvider {
+  // TODO: implement
+}

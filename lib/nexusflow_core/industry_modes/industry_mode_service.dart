@@ -1,0 +1,3 @@
+class IndustryModeService {
+  // TODO: implement
+}

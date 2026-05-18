@@ -1,0 +1,1206 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+
+import '../core/region_settings.dart';
+import 'remote_config_service.dart';
+import 'voice_text_cleanup_service.dart';
+
+enum SttListenFailure {
+  unsupportedLocale,
+  permissionDenied,
+  silence,
+  unavailable,
+}
+
+class SttListenResult {
+  const SttListenResult._({
+    this.text,
+    this.failure,
+    this.message,
+  });
+
+  factory SttListenResult.success(String text) {
+    return SttListenResult._(text: text.trim());
+  }
+
+  factory SttListenResult.failure({
+    required SttListenFailure failure,
+    required String message,
+    String? text,
+  }) {
+    return SttListenResult._(
+      text: text?.trim(),
+      failure: failure,
+      message: message,
+    );
+  }
+
+  final String? text;
+  final SttListenFailure? failure;
+  final String? message;
+
+  bool get hasText => text != null && text!.trim().isNotEmpty;
+  bool get isSuccess => failure == null && hasText;
+}
+
+class SttService {
+  const SttService();
+
+  static const String _koreanLocaleId = 'ko_KR';
+  static Duration get _listenFor {
+    final seconds = RemoteConfigService.maxVoiceDurationSeconds;
+    return Duration(seconds: seconds <= 0 ? 60 : seconds);
+  }
+
+  static const Duration _pauseFor = Duration(seconds: 20);
+  static const MethodChannel _nativeSttChannel =
+      MethodChannel('planflow/native_stt');
+  static const MethodChannel _androidPermissionsChannel =
+      MethodChannel('planflow/android_permissions');
+
+  static SpeechToText? _activeSpeech;
+  static Completer<SttListenResult>? _activeCompleter;
+  static String? _activeRecognizedText;
+  static var _userRequestedStop = false;
+  static var _activeNativeListen = false;
+  static List<String>? _activeCommittedSegments;
+  static var _activeNativeSessionText = '';
+  static int? _activeNativeSessionId;
+
+  static String? resolveKoreanLocaleId(Iterable<String> localeIds) {
+    if (localeIds.contains(_koreanLocaleId)) {
+      return _koreanLocaleId;
+    }
+    for (final localeId in localeIds) {
+      if (localeId.toLowerCase().startsWith('ko')) {
+        return localeId;
+      }
+    }
+    return null;
+  }
+
+  static String? resolvePreferredLocaleId(Iterable<String> localeIds) {
+    final locales = localeIds.toList(growable: false);
+    final preferred = PlanFlowRegionController.instance.region.languageHint;
+    if (locales.contains(preferred)) {
+      return preferred;
+    }
+    final language = preferred.split('-').first.toLowerCase();
+    for (final localeId in locales) {
+      if (localeId.toLowerCase().startsWith(language)) {
+        return localeId;
+      }
+    }
+    return resolveKoreanLocaleId(locales);
+  }
+
+  @visibleForTesting
+  static SttVoiceCommand detectVoiceCommand(
+    String text, {
+    bool includeCancel = true,
+  }) {
+    final normalized = _normalizeVoiceCommandText(text);
+    return _resolveVoiceCommandFromNormalized(
+      normalized,
+      includeCancel: includeCancel,
+    );
+  }
+
+  static String normalizeVoiceTranscript(
+    String text, {
+    ValueChanged<SttVoiceCommand>? onCommand,
+    bool includeCancelCommands = false,
+  }) {
+    var tokens = text
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((token) => token.isNotEmpty)
+        .toList(growable: true);
+    if (tokens.isEmpty) {
+      return '';
+    }
+
+    tokens = _applyInlineCorrections(tokens);
+    tokens = _collapseRepeatedSpeech(tokens);
+    final output = <String>[];
+
+    var index = 0;
+    while (index < tokens.length) {
+      final command = _matchVoiceCommand(
+        tokens,
+        index,
+        includeCancel: includeCancelCommands,
+      );
+      if (command != null) {
+        final isWholeTranscriptCommand =
+            index == 0 && command.consumedTokens == tokens.length;
+        if (command.command == SttVoiceCommand.cancel &&
+            !isWholeTranscriptCommand) {
+          output.add(tokens[index]);
+          index += 1;
+          continue;
+        }
+        onCommand?.call(command.command);
+        switch (command.command) {
+          case SttVoiceCommand.undoLastWord:
+            _removeLastTranscriptWord(output);
+            break;
+          case SttVoiceCommand.undoLastSegment:
+            _removeLastTranscriptSegment(output);
+            break;
+          case SttVoiceCommand.clearAll:
+            output.clear();
+            break;
+          case SttVoiceCommand.cancel:
+            break;
+          case SttVoiceCommand.none:
+            break;
+        }
+        index += command.consumedTokens;
+        continue;
+      }
+
+      final cleanedToken = _normalizeTranscriptToken(tokens[index]);
+      if (cleanedToken.isNotEmpty) {
+        output.add(cleanedToken);
+      }
+      index += 1;
+    }
+
+    return _normalizeCommonKoreanSttPhrases(output.join(' ')).trim();
+  }
+
+  static String _normalizeCommonKoreanSttPhrases(String text) {
+    return VoiceTextCleanupService.normalizeBasic(text);
+  }
+
+  static List<String> _collapseRepeatedSpeech(List<String> tokens) {
+    final adjacentCollapsed = _collapseAdjacentRepeatedSpeech(tokens);
+    return _collapseRepeatedSpeechPrefixes(adjacentCollapsed);
+  }
+
+  static List<String> _collapseAdjacentRepeatedSpeech(List<String> tokens) {
+    final normalized = tokens
+        .map(_normalizeTranscriptToken)
+        .where((token) => token.isNotEmpty)
+        .toList();
+    if (normalized.length < 4) {
+      return tokens;
+    }
+
+    for (var size = normalized.length ~/ 2; size >= 2; size -= 1) {
+      for (var start = 0; start + size * 2 <= normalized.length; start += 1) {
+        var repeated = true;
+        for (var offset = 0; offset < size; offset += 1) {
+          if (normalized[start + offset] != normalized[start + size + offset]) {
+            repeated = false;
+            break;
+          }
+        }
+        if (repeated) {
+          return <String>[
+            ...tokens.take(start),
+            ...tokens.skip(start + size),
+          ];
+        }
+      }
+    }
+
+    return tokens;
+  }
+
+  static List<String> _collapseRepeatedSpeechPrefixes(List<String> tokens) {
+    final normalized = tokens
+        .map(_normalizeTranscriptToken)
+        .where((token) => token.isNotEmpty)
+        .toList();
+    if (normalized.length < 4) {
+      return tokens;
+    }
+
+    var bestStart = -1;
+    var bestOverlap = 0;
+    final firstToken = normalized.first;
+    for (var index = 1; index < normalized.length; index += 1) {
+      if (normalized[index] != firstToken) {
+        continue;
+      }
+      final suffixLength = normalized.length - index;
+      final prefixLimit = suffixLength < index ? suffixLength : index;
+      var overlap = 0;
+      while (overlap < prefixLimit &&
+          normalized[overlap] == normalized[index + overlap]) {
+        overlap += 1;
+      }
+      if (overlap >= 2 && (index > bestStart || overlap >= bestOverlap)) {
+        bestStart = index;
+        bestOverlap = overlap;
+      }
+    }
+
+    if (bestStart <= 0) {
+      return tokens;
+    }
+    return tokens.sublist(bestStart);
+  }
+
+  static List<String> _applyInlineCorrections(List<String> tokens) {
+    var result = List<String>.from(tokens);
+    var index = 0;
+    while (index < result.length) {
+      final normalized = _normalizeTranscriptToken(result[index]);
+      if ((normalized == '?ÑÎãà' ||
+              normalized == '?ÑÎãà?? ||
+              normalized == '?ÑÎãà?? ||
+              normalized == '?ÑÎãà??) &&
+          index > 0 &&
+          index < result.length - 1) {
+        final before = result.sublist(0, index);
+        final correction = result.sublist(index + 1);
+        result = _replaceTailWords(before, correction);
+        index = 0;
+        continue;
+      }
+      index += 1;
+    }
+    return result;
+  }
+
+  static List<String> _replaceTailWords(
+    List<String> baseWords,
+    List<String> correctionWords,
+  ) {
+    final base = baseWords
+        .map(_normalizeTranscriptToken)
+        .where((word) => word.isNotEmpty)
+        .toList();
+    final correction = correctionWords
+        .map(_normalizeTranscriptToken)
+        .where((word) => word.isNotEmpty)
+        .toList();
+    if (base.isEmpty) {
+      return correction;
+    }
+    if (correction.isEmpty) {
+      return base;
+    }
+    if (_timePrefixTokens.contains(correction.first)) {
+      for (var index = base.length - 1; index >= 0; index -= 1) {
+        if (_timePrefixTokens.contains(base[index])) {
+          return <String>[
+            ...base.take(index),
+            ...correction,
+          ];
+        }
+      }
+    }
+    for (var index = base.length - 1; index >= 0; index -= 1) {
+      if (base[index] == correction.first ||
+          correction.first.startsWith(base[index]) ||
+          base[index].startsWith(correction.first)) {
+        return <String>[
+          ...base.take(index),
+          ...correction,
+        ];
+      }
+    }
+    final replaceCount =
+        correction.length <= base.length ? correction.length : base.length;
+    return <String>[
+      ...base.take(base.length - replaceCount),
+      ...correction,
+    ];
+  }
+
+  static String _normalizeVoiceCommandText(String text) {
+    return text
+        .trim()
+        .replaceAll(RegExp(r'[\s\p{P}\p{S}]', unicode: true), '')
+        .toLowerCase();
+  }
+
+  static _VoiceCommandMatch? _matchVoiceCommand(
+    List<String> tokens,
+    int index, {
+    bool includeCancel = false,
+  }) {
+    const maxCommandTokens = 3;
+    final maxLength = index + maxCommandTokens <= tokens.length
+        ? maxCommandTokens
+        : tokens.length - index;
+    for (var length = maxLength; length >= 1; length -= 1) {
+      final normalized = List<String>.generate(
+        length,
+        (offset) => _normalizeTranscriptToken(tokens[index + offset]),
+      ).join();
+      final command = _resolveVoiceCommandFromNormalized(
+        normalized,
+        includeCancel: includeCancel,
+      );
+      if (command != SttVoiceCommand.none) {
+        return _VoiceCommandMatch(command, length);
+      }
+    }
+    return null;
+  }
+
+  static SttVoiceCommand _resolveVoiceCommandFromNormalized(
+    String normalized, {
+    bool includeCancel = false,
+  }) {
+    if (_undoLastWordCommandTokens.contains(normalized)) {
+      return SttVoiceCommand.undoLastWord;
+    }
+    if (_undoLastSegmentCommandTokens.contains(normalized)) {
+      return SttVoiceCommand.undoLastSegment;
+    }
+    if (_clearAllCommandTokens.contains(normalized)) {
+      return SttVoiceCommand.clearAll;
+    }
+    if (includeCancel && _stopCommandTokens.contains(normalized)) {
+      return SttVoiceCommand.cancel;
+    }
+    return SttVoiceCommand.none;
+  }
+
+  static bool _applyVoiceControlCommandForSpeechToText(
+    SttVoiceCommand command,
+    String currentText,
+    ValueChanged<String> onTextUpdated,
+    VoidCallback onCancelRequested,
+  ) {
+    switch (command) {
+      case SttVoiceCommand.undoLastWord:
+        onTextUpdated(_applyTextCommand(_removeLastWordFromText(currentText)));
+        return true;
+      case SttVoiceCommand.undoLastSegment:
+        onTextUpdated(
+            _applyTextCommand(_removeLastSegmentFromText(currentText)));
+        return true;
+      case SttVoiceCommand.clearAll:
+        onTextUpdated('');
+        return true;
+      case SttVoiceCommand.cancel:
+        onCancelRequested();
+        return true;
+      case SttVoiceCommand.none:
+        return false;
+    }
+  }
+
+  static String _applyTextCommand(String text) {
+    if (text.isEmpty) {
+      return '';
+    }
+    return text.trim();
+  }
+
+  static String _removeLastWordFromText(String text) {
+    final output = text
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((token) => token.isNotEmpty)
+        .toList();
+    _removeLastTranscriptWord(output);
+    return output.join(' ');
+  }
+
+  static String _removeLastSegmentFromText(String text) {
+    final output = text
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((token) => token.isNotEmpty)
+        .toList();
+    _removeLastTranscriptSegment(output);
+    return output.join(' ');
+  }
+
+  static String _normalizeTranscriptToken(String token) {
+    return token
+        .trim()
+        .replaceAll(RegExp(r'[\s\p{P}\p{S}]', unicode: true), '')
+        .toLowerCase();
+  }
+
+  static void _removeLastTranscriptWord(List<String> output) {
+    if (output.isEmpty) {
+      return;
+    }
+    output.removeLast();
+    if (output.isEmpty) {
+      return;
+    }
+    final tail = _normalizeTranscriptToken(output.last);
+    if (_timePrefixTokens.contains(tail) && output.isNotEmpty) {
+      output.removeLast();
+    }
+  }
+
+  static void _removeLastTranscriptSegment(List<String> output) {
+    if (output.isNotEmpty) {
+      output.removeLast();
+    }
+  }
+
+  @visibleForTesting
+  static String appendOnlyNewSpeech(String committedText, String incomingText) {
+    final committedWords = committedText
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    final incomingWords = incomingText
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    if (incomingWords.isEmpty) {
+      return '';
+    }
+    if (committedWords.isEmpty) {
+      return incomingWords.join(' ');
+    }
+
+    final maxOverlap = committedWords.length < incomingWords.length
+        ? committedWords.length
+        : incomingWords.length;
+    for (var overlap = maxOverlap; overlap > 0; overlap -= 1) {
+      final committedTail = committedWords.sublist(
+        committedWords.length - overlap,
+      );
+      final incomingHead = incomingWords.sublist(0, overlap);
+      if (listEquals(
+        committedTail.map(_transcriptOverlapKey).toList(growable: false),
+        incomingHead.map(_transcriptOverlapKey).toList(growable: false),
+      )) {
+        return incomingWords.sublist(overlap).join(' ');
+      }
+    }
+
+    final incoming = incomingWords.join(' ');
+    final committed = committedWords.join(' ');
+    if (committed.endsWith(incoming)) {
+      return '';
+    }
+    return incoming;
+  }
+
+  static String _transcriptOverlapKey(String token) {
+    return _normalizeTranscriptToken(token).replaceFirst(
+      RegExp(r'(?ºÎ°ú|?êÏÑú|?êÍ≤å|?úÌÖå|Î°?????Î•???Í∞Ä)$'),
+      '',
+    );
+  }
+
+  @visibleForTesting
+  static String mergeTranscriptSegment(String committedText, String segment) {
+    final normalizedSegment = segment.trim();
+    if (normalizedSegment.isEmpty) {
+      return committedText.trim();
+    }
+    final committed = committedText.trim();
+    if (committed.isEmpty) {
+      return normalizedSegment;
+    }
+    final committedWords = committed
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    final incomingWords = normalizedSegment
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    final maxOverlap = committedWords.length < incomingWords.length
+        ? committedWords.length
+        : incomingWords.length;
+    for (var overlap = maxOverlap; overlap > 0; overlap -= 1) {
+      final committedTail = committedWords.sublist(
+        committedWords.length - overlap,
+      );
+      final incomingHead = incomingWords.sublist(0, overlap);
+      if (!listEquals(
+        committedTail.map(_transcriptOverlapKey).toList(growable: false),
+        incomingHead.map(_transcriptOverlapKey).toList(growable: false),
+      )) {
+        continue;
+      }
+      final mergedWords = List<String>.of(committedWords);
+      for (var index = 0; index < overlap; index += 1) {
+        final committedIndex = mergedWords.length - overlap + index;
+        final incoming = incomingHead[index];
+        if (_normalizeTranscriptToken(incoming).startsWith(
+          _normalizeTranscriptToken(mergedWords[committedIndex]),
+        )) {
+          mergedWords[committedIndex] = incoming;
+        }
+      }
+      mergedWords.addAll(incomingWords.sublist(overlap));
+      return mergedWords.join(' ');
+    }
+    return '$committed $normalizedSegment'.trim();
+  }
+
+  @visibleForTesting
+  static SpeechListenOptions buildListenOptions() {
+    return SpeechListenOptions(
+      onDevice: true,
+      partialResults: true,
+      cancelOnError: false,
+      listenMode: ListenMode.dictation,
+    );
+  }
+
+  Future<void> stopActiveListen() async {
+    _userRequestedStop = true;
+    if (_activeNativeListen) {
+      try {
+        await _nativeSttChannel.invokeMethod<String>('stop');
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      _completeActiveListenFromText();
+      return;
+    }
+    final speech = _activeSpeech;
+    if (speech == null) {
+      return;
+    }
+    if (speech.isListening) {
+      await speech.stop();
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    _completeActiveListenFromText();
+  }
+
+  Future<void> cancelActiveListen() async {
+    _userRequestedStop = true;
+    if (_activeNativeListen) {
+      try {
+        await _nativeSttChannel.invokeMethod<String>('cancel');
+      } catch (_) {}
+      _completeActiveFailure(
+        failure: SttListenFailure.silence,
+        message: '?åÏÑ± ?ÖÎ†•??Ï∑®ÏÜå?àÏñ¥??',
+      );
+      return;
+    }
+    final speech = _activeSpeech;
+    if (speech == null) {
+      return;
+    }
+    await speech.cancel();
+    _completeActiveFailure(
+      failure: SttListenFailure.silence,
+      message: '?åÏÑ± ?ÖÎ†•??Ï∑®ÏÜå?àÏñ¥??',
+    );
+  }
+
+  Future<String> undoLastSpeechSegment() async {
+    if (_activeNativeListen) {
+      if (_activeNativeSessionText.trim().isNotEmpty) {
+        _activeNativeSessionText = '';
+        _activeNativeSessionId = await _resetNativeTranscript();
+      } else {
+        final segments = _activeCommittedSegments;
+        if (segments != null && segments.isNotEmpty) {
+          segments.removeLast();
+        }
+      }
+      return _syncNativeTranscript();
+    }
+    return _editActiveText((text) {
+      final words = text.trim().split(RegExp(r'\s+'));
+      if (words.isEmpty || words.first.isEmpty) {
+        return '';
+      }
+      words.removeLast();
+      return words.join(' ');
+    });
+  }
+
+  Future<String> undoLastSpeechWord() async {
+    if (_activeNativeListen) {
+      final sessionWords =
+          _activeNativeSessionText.trim().split(RegExp(r'\s+'));
+      if (_activeNativeSessionText.trim().isNotEmpty &&
+          sessionWords.isNotEmpty) {
+        sessionWords.removeLast();
+        _activeNativeSessionText = sessionWords.join(' ');
+        _activeNativeSessionId = await _resetNativeTranscript();
+      } else {
+        final segments = _activeCommittedSegments;
+        if (segments != null && segments.isNotEmpty) {
+          final lastWords = segments.last.trim().split(RegExp(r'\s+'));
+          if (lastWords.length <= 1) {
+            segments.removeLast();
+          } else {
+            lastWords.removeLast();
+            segments[segments.length - 1] = lastWords.join(' ');
+          }
+        }
+      }
+      return _syncNativeTranscript();
+    }
+    return _editActiveText((text) {
+      final words = text.trim().split(RegExp(r'\s+'));
+      if (words.isEmpty || words.first.isEmpty) {
+        return '';
+      }
+      words.removeLast();
+      return words.join(' ');
+    });
+  }
+
+  Future<String> clearActiveTranscript() async {
+    if (_activeNativeListen) {
+      _activeCommittedSegments?.clear();
+      _activeNativeSessionText = '';
+      _activeRecognizedText = '';
+      _activeNativeSessionId = await _resetNativeTranscript();
+      return '';
+    }
+    _activeRecognizedText = '';
+    return '';
+  }
+
+  Future<SttListenResult> listen({
+    ValueChanged<String>? onPartialResult,
+    ValueChanged<int>? onRestart,
+  }) async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      final permissionResult = await _ensureAndroidMicrophonePermission();
+      if (permissionResult != null) {
+        return permissionResult;
+      }
+      final nativeResult = await _listenWithNativeAndroid(
+        onPartialResult: onPartialResult,
+        onRestart: onRestart,
+      );
+      if (nativeResult.failure != SttListenFailure.unavailable) {
+        return nativeResult;
+      }
+    }
+    return _listenWithSpeechToText(onPartialResult: onPartialResult);
+  }
+
+  Future<SttListenResult> _listenWithSpeechToText({
+    ValueChanged<String>? onPartialResult,
+  }) async {
+    final speech = SpeechToText();
+    final completer = Completer<SttListenResult>();
+    String? latestRecognizedText;
+    _activeSpeech = speech;
+    _activeCompleter = completer;
+    _activeRecognizedText = null;
+    _userRequestedStop = false;
+
+    void completeSuccess([String? text]) {
+      if (completer.isCompleted) {
+        return;
+      }
+      final normalized = (text ?? latestRecognizedText)?.trim();
+      if (normalized == null || normalized.isEmpty) {
+        completer.complete(
+          SttListenResult.failure(
+            failure: SttListenFailure.silence,
+            message: _silenceMessage,
+            text: latestRecognizedText,
+          ),
+        );
+        return;
+      }
+      completer.complete(SttListenResult.success(normalized));
+    }
+
+    try {
+      final available = await speech.initialize(
+        debugLogging: kDebugMode,
+        onStatus: (status) {
+          if (_userRequestedStop &&
+              (status == SpeechToText.doneStatus ||
+                  status == SpeechToText.notListeningStatus)) {
+            completeSuccess();
+          }
+        },
+        onError: (error) {
+          if (error.errorMsg == 'error_permission' ||
+              error.errorMsg == 'error_client') {
+            _completeActiveFailure(
+              failure: SttListenFailure.permissionDenied,
+              message: _permissionMessage,
+            );
+          }
+        },
+      );
+      if (!available) {
+        final hasPermission = await speech.hasPermission;
+        return SttListenResult.failure(
+          failure: hasPermission
+              ? SttListenFailure.unavailable
+              : SttListenFailure.permissionDenied,
+          message: hasPermission ? _genericMessage : _permissionMessage,
+        );
+      }
+
+      final locales = await speech.locales();
+      final localeId = resolvePreferredLocaleId(
+        locales.map((locale) => locale.localeId),
+      );
+      if (localeId == null) {
+        return SttListenResult.failure(
+          failure: SttListenFailure.unsupportedLocale,
+          message: _unsupportedLocaleMessage,
+        );
+      }
+
+      await speech.listen(
+        localeId: localeId,
+        listenFor: _listenFor,
+        pauseFor: _pauseFor,
+        listenOptions: buildListenOptions(),
+        onResult: (result) {
+          final text = result.recognizedWords.trim();
+          if (text.isEmpty) {
+            return;
+          }
+          final command = detectVoiceCommand(text);
+          if (command != SttVoiceCommand.none) {
+            final didHandle = _applyVoiceControlCommandForSpeechToText(
+              command,
+              latestRecognizedText ?? '',
+              (nextText) {
+                latestRecognizedText = nextText;
+                _activeRecognizedText = nextText;
+                onPartialResult?.call(nextText);
+              },
+              () => _completeActiveFailure(
+                failure: SttListenFailure.silence,
+                message: '?åÏÑ± ?ÖÎ†•??Ï∑®ÏÜå?àÏñ¥??',
+              ),
+            );
+            if (didHandle) {
+              return;
+            }
+          }
+          latestRecognizedText = text;
+          _activeRecognizedText = text;
+          onPartialResult?.call(text);
+          if (result.finalResult && _userRequestedStop) {
+            completeSuccess(text);
+          }
+        },
+      );
+
+      return await completer.future.timeout(
+        _listenFor + const Duration(seconds: 5),
+        onTimeout: () async {
+          await speech.cancel();
+          final normalized = latestRecognizedText?.trim();
+          if (normalized == null || normalized.isEmpty) {
+            return SttListenResult.failure(
+              failure: SttListenFailure.silence,
+              message: _silenceMessage,
+            );
+          }
+          return SttListenResult.success(normalized);
+        },
+      );
+    } catch (_) {
+      return SttListenResult.failure(
+        failure: SttListenFailure.unavailable,
+        message: _genericMessage,
+        text: latestRecognizedText,
+      );
+    } finally {
+      if (!_userRequestedStop && speech.isListening) {
+        await speech.cancel();
+      }
+      if (identical(_activeSpeech, speech)) {
+        _activeSpeech = null;
+        _activeCompleter = null;
+        _activeRecognizedText = null;
+      }
+    }
+  }
+
+  Future<SttListenResult?> _ensureAndroidMicrophonePermission() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return null;
+    }
+
+    try {
+      final granted = await _androidPermissionsChannel.invokeMethod<bool>(
+            'requestMicrophonePermission',
+          ) ??
+          false;
+      if (!granted) {
+        return SttListenResult.failure(
+          failure: SttListenFailure.permissionDenied,
+          message: _permissionMessage,
+        );
+      }
+      return null;
+    } catch (error) {
+      debugPrint('PlanFlow STT permission check failed: $error');
+      return SttListenResult.failure(
+        failure: SttListenFailure.permissionDenied,
+        message: _permissionMessage,
+      );
+    }
+  }
+
+  static void _completeActiveListenFromText() {
+    final completer = _activeCompleter;
+    if (completer == null || completer.isCompleted) {
+      return;
+    }
+    final normalized = _activeRecognizedText?.trim();
+    if (normalized == null || normalized.isEmpty) {
+      completer.complete(
+        SttListenResult.failure(
+          failure: SttListenFailure.silence,
+          message: _silenceMessage,
+        ),
+      );
+    } else {
+      completer.complete(SttListenResult.success(normalized));
+    }
+  }
+
+  static void _completeActiveFailure({
+    required SttListenFailure failure,
+    required String message,
+  }) {
+    final completer = _activeCompleter;
+    if (completer == null || completer.isCompleted) {
+      return;
+    }
+    completer.complete(
+      SttListenResult.failure(
+        failure: failure,
+        message: message,
+        text: _activeRecognizedText,
+      ),
+    );
+  }
+
+  static String _syncNativeTranscript() {
+    final segments = _activeCommittedSegments ?? const <String>[];
+    final pieces = <String>[
+      ...segments,
+      if (_activeNativeSessionText.trim().isNotEmpty)
+        _activeNativeSessionText.trim(),
+    ];
+    final transcript = pieces.join(' ').trim();
+    _activeRecognizedText = transcript;
+    return transcript;
+  }
+
+  static String _editActiveText(String Function(String text) edit) {
+    final nextText = edit(_activeRecognizedText ?? '').trim();
+    _activeRecognizedText = nextText;
+    return nextText;
+  }
+
+  static Future<int?> _resetNativeTranscript() async {
+    try {
+      return await _nativeSttChannel.invokeMethod<int>('resetTranscript');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<SttListenResult> _listenWithNativeAndroid({
+    ValueChanged<String>? onPartialResult,
+    ValueChanged<int>? onRestart,
+  }) async {
+    final completer = Completer<SttListenResult>();
+    final committedSegments = <String>[];
+    String latestRecognizedText = '';
+    var restartCount = 0;
+    _activeNativeListen = true;
+    _activeCommittedSegments = committedSegments;
+    _activeNativeSessionText = '';
+    _activeNativeSessionId = null;
+    _activeCompleter = completer;
+    _activeRecognizedText = null;
+    _userRequestedStop = false;
+
+    String eventText(Object? arguments) {
+      if (arguments is Map) {
+        return arguments['text']?.toString() ?? '';
+      }
+      return arguments?.toString() ?? '';
+    }
+
+    int? eventSessionId(Object? arguments) {
+      if (arguments is Map) {
+        final value = arguments['sessionId'];
+        if (value is int) {
+          return value;
+        }
+        return int.tryParse(value?.toString() ?? '');
+      }
+      return null;
+    }
+
+    bool acceptsEvent(Object? arguments) {
+      final eventSession = eventSessionId(arguments);
+      if (eventSession == null) {
+        return true;
+      }
+      _activeNativeSessionId ??= eventSession;
+      return eventSession == _activeNativeSessionId;
+    }
+
+    void setCommittedTranscript(String nextText) {
+      final normalized = nextText.trim();
+      committedSegments
+        ..clear()
+        ..addAll([
+          if (normalized.isNotEmpty) normalized,
+        ]);
+      _activeNativeSessionText = '';
+      latestRecognizedText = normalized;
+      _activeRecognizedText = normalized;
+      onPartialResult?.call(normalized);
+    }
+
+    bool handleNativeVoiceControlCommand(
+      String text, {
+      bool includeCancel = true,
+    }) {
+      final command = detectVoiceCommand(text, includeCancel: includeCancel);
+      if (command == SttVoiceCommand.none) {
+        return false;
+      }
+      final didHandle = _applyVoiceControlCommandForSpeechToText(
+        command,
+        committedSegments.join(' ').trim(),
+        setCommittedTranscript,
+        () {
+          _activeNativeSessionText = '';
+          latestRecognizedText = committedSegments.join(' ').trim();
+          _activeRecognizedText = latestRecognizedText;
+          _completeActiveFailure(
+            failure: SttListenFailure.silence,
+            message: '?åÏÑ± ?ÖÎ†•??Ï∑®ÏÜå?àÏñ¥??',
+          );
+        },
+      );
+      if (didHandle && command == SttVoiceCommand.clearAll) {
+        unawaited(_resetNativeTranscript().then((id) {
+          _activeNativeSessionId = id;
+        }));
+      }
+      return didHandle;
+    }
+
+    void updateRecognizedText(String incomingText) {
+      final recognizedWords = incomingText.trim();
+      if (recognizedWords.isEmpty) {
+        return;
+      }
+      if (handleNativeVoiceControlCommand(recognizedWords)) {
+        return;
+      }
+      final committedText = committedSegments.join(' ').trim();
+      final newSpeech = appendOnlyNewSpeech(committedText, recognizedWords);
+      if (handleNativeVoiceControlCommand(
+        newSpeech,
+        includeCancel: recognizedWords == newSpeech,
+      )) {
+        return;
+      }
+      final mergedText = [
+        if (committedText.isNotEmpty) committedText,
+        if (newSpeech.isNotEmpty) newSpeech,
+      ].join(' ').trim();
+      _activeNativeSessionText = newSpeech;
+      latestRecognizedText = mergedText;
+      _activeRecognizedText = mergedText;
+      onPartialResult?.call(mergedText);
+    }
+
+    bool commitActiveSession() {
+      final text = _activeNativeSessionText.trim();
+      if (text.isEmpty) {
+        return false;
+      }
+      if (handleNativeVoiceControlCommand(text)) {
+        return false;
+      }
+      final committedText = committedSegments.join(' ').trim();
+      final mergedText = mergeTranscriptSegment(committedText, text);
+      if (mergedText == committedText) {
+        _activeNativeSessionText = '';
+        latestRecognizedText = committedText;
+        _activeRecognizedText = latestRecognizedText;
+        return false;
+      }
+      committedSegments
+        ..clear()
+        ..add(mergedText);
+      _activeNativeSessionText = '';
+      latestRecognizedText = mergedText;
+      _activeRecognizedText = latestRecognizedText;
+      onPartialResult?.call(latestRecognizedText);
+      return true;
+    }
+
+    _nativeSttChannel.setMethodCallHandler((call) async {
+      if (!acceptsEvent(call.arguments)) {
+        return;
+      }
+      switch (call.method) {
+        case 'partial':
+          updateRecognizedText(eventText(call.arguments));
+          break;
+        case 'stopped':
+          updateRecognizedText(eventText(call.arguments));
+          commitActiveSession();
+          _completeActiveListenFromText();
+          break;
+        case 'cancelled':
+          _completeActiveFailure(
+            failure: SttListenFailure.silence,
+            message: '?åÏÑ± ?ÖÎ†•??Ï∑®ÏÜå?àÏñ¥??',
+          );
+          break;
+        case 'error':
+          _completeActiveFailure(
+            failure: SttListenFailure.unavailable,
+            message: _genericMessage,
+          );
+          break;
+        case 'restarted':
+          restartCount += 1;
+          final committed = commitActiveSession();
+          if (!committed && restartCount > 1) {
+            break;
+          }
+          onRestart?.call(restartCount);
+          break;
+        case 'segmentEnded':
+          commitActiveSession();
+          break;
+      }
+    });
+
+    try {
+      final started = await _nativeSttChannel.invokeMethod<bool>('start');
+      if (started != true) {
+        return SttListenResult.failure(
+          failure: SttListenFailure.unavailable,
+          message: _genericMessage,
+        );
+      }
+      return await completer.future.timeout(
+        _listenFor + const Duration(seconds: 5),
+        onTimeout: () async {
+          await _nativeSttChannel.invokeMethod<String>('cancel');
+          commitActiveSession();
+          final normalized = latestRecognizedText.trim();
+          if (normalized.isEmpty) {
+            return SttListenResult.failure(
+              failure: SttListenFailure.silence,
+              message: _silenceMessage,
+            );
+          }
+          return SttListenResult.success(normalized);
+        },
+      );
+    } catch (_) {
+      return SttListenResult.failure(
+        failure: SttListenFailure.unavailable,
+        message: _genericMessage,
+        text: latestRecognizedText,
+      );
+    } finally {
+      _activeNativeListen = false;
+      _activeCommittedSegments = null;
+      _activeNativeSessionText = '';
+      _activeNativeSessionId = null;
+      _nativeSttChannel.setMethodCallHandler(null);
+      if (_activeCompleter == completer) {
+        _activeCompleter = null;
+        _activeRecognizedText = null;
+      }
+    }
+  }
+}
+
+enum SttVoiceCommand {
+  none,
+  undoLastWord,
+  undoLastSegment,
+  clearAll,
+  cancel,
+}
+
+const String _unsupportedLocaleMessage =
+    '??Í∏∞Í∏∞?êÏÑú???®ÎîîÎ∞îÏù¥???úÍµ≠???åÏÑ± ?∏Ïãù???¨Ïö©?????ÜÏñ¥?? ÏßÅÏ†ë ?ÖÎ†•?ºÎ°ú ?¥Ïñ¥Í∞Ä Ï£ºÏÑ∏??';
+const String _permissionMessage =
+    'ÎßàÏù¥??Í∂åÌïú???ÜÏñ¥?? ?§Ï†ï?êÏÑú Í∂åÌïú???àÏö©?????§Ïãú ?úÎèÑ?òÍ±∞??ÏßÅÏ†ë ?ÖÎ†•?ºÎ°ú ?¥Ïñ¥Í∞Ä Ï£ºÏÑ∏??';
+const String _silenceMessage = '?åÏÑ±???∏Ïãù?òÏ? ?äÏïò?¥Ïöî. Ï°∞Í∏à ???¨Í≤å ÎßêÌïòÍ±∞ÎÇò ÏßÅÏ†ë ?ÖÎ†•?ºÎ°ú ?¥Ïñ¥Í∞Ä Ï£ºÏÑ∏??';
+const String _genericMessage = '?åÏÑ± ?ÖÎ†•???úÏûë?òÏ? Î™ªÌñà?¥Ïöî. ÏßÅÏ†ë ?ÖÎ†•?ºÎ°ú ?¥Ïñ¥Í∞Ä Ï£ºÏÑ∏??';
+
+const Set<String> _timePrefixTokens = <String>{
+  '?§Ï†Ñ',
+  '?§ÌõÑ',
+  '?Ä??,
+  '?ÑÏπ®',
+  '?êÏã¨',
+  'Î∞?,
+};
+
+const Set<String> _undoLastWordCommandTokens = <String>{
+  '?ÑÎãà',
+  '?ÑÎãà??,
+  '?ÑÎãà??,
+  '?ÑÎãà??,
+};
+const Set<String> _undoLastSegmentCommandTokens = <String>{
+  'ÎßàÏ?ÎßâÍ±∞ÏßÄ??,
+  'Î∞©Í∏àÍ±∞Ï???,
+  'ÎßàÏ?ÎßâÏÇ≠??,
+  'Î∞©Í∏à??†ú',
+};
+const Set<String> _clearAllCommandTokens = <String>{
+  '?§Ïãú',
+  'Ï≤òÏùåÎ∂Ä??,
+  '?§ÏãúÎßêÌï†Í≤?,
+  '?ÑÏ≤¥??†ú',
+  '?ÑÏ≤¥Ï∑®ÏÜå',
+};
+const Set<String> _stopCommandTokens = <String>{
+  'Ï∑®ÏÜå',
+  'Ï∑®ÏÜå??,
+  'Ï∑®ÏÜå?¥Ï§ò',
+  'Ï∑®ÏÜå?¥Ï£º?∏Ïöî',
+  'Í∑∏Îßå',
+  'Í∑∏Îßå??,
+  'Í∑∏Îßå?¥Ï§ò',
+  'Í∑∏Îßå?¥Ï£º?∏Ïöî',
+  'Ï§ëÎã®',
+  'Ï§ëÎã®??,
+  'Ï§ëÎã®?¥Ï§ò',
+  'Ï§ëÎã®?¥Ï£º?∏Ïöî',
+  'Ï§ëÏ?',
+  'Ï§ëÏ???,
+  'Ï§ëÏ??¥Ï§ò',
+  'Ï§ëÏ??¥Ï£º?∏Ïöî',
+  '?ïÏ?',
+  '?ïÏ???,
+  '?ïÏ??¥Ï§ò',
+  '?ïÏ??¥Ï£º?∏Ïöî',
+};
+
+class _VoiceCommandMatch {
+  const _VoiceCommandMatch(this.command, this.consumedTokens);
+
+  final SttVoiceCommand command;
+  final int consumedTokens;
+}

@@ -1,0 +1,3 @@
+class AvailabilityWidget {
+  // TODO: implement
+}

@@ -1,0 +1,3 @@
+class HealthScoreWidget {
+  // TODO: implement
+}

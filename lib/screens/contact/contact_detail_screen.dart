@@ -1,0 +1,3 @@
+class ContactDetailScreen {
+  // TODO: implement
+}

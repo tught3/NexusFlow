@@ -1,0 +1,3 @@
+class HealthScoreService {
+  // TODO: implement
+}

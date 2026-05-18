@@ -1,0 +1,3 @@
+class SecureVaultService {
+  // TODO: implement
+}
