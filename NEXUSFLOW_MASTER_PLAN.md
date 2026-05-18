@@ -238,7 +238,7 @@ services/                 감지 서비스
 - [ ] 로그인 화면
 
 ## 공통 컴포넌트
-- [ ] NexusflowFab (글로벌 FAB)
+- [x] NexusflowFab (글로벌 FAB)
 - [ ] 플로팅 오버레이
 - [ ] Confidence 배지
 - [ ] Health Score 위젯
@@ -246,9 +246,9 @@ services/                 감지 서비스
 ## Flow Core
 - [x] nexusflow_ai_service.dart
 - [x] nexusflow_pipeline.dart
-- [ ] floating_overlay_service.dart
+- [x] floating_overlay_service.dart
 - [ ] ocr_service.dart
-- [ ] screenshot_detector_service.dart
+- [x] screenshot_detector_service.dart
 - [ ] sms_detector_service.dart
 - [ ] kakao_detector_service.dart
 - [ ] call_detector_service.dart
@@ -309,4 +309,4 @@ services/                 감지 서비스
 
 ---
 
-_마지막 업데이트: 2026-05-18_
+_마지막 업데이트: 2026-05-19_

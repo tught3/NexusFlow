@@ -1,0 +1,285 @@
+아래 3개 파일을 각각 만들어줘.
+
+=== 파일 1 ===
+경로: E:\FluxStudio\NexusFlow\lib\widgets\nexusflow_fab.dart
+
+// NexusFlow 글로벌 FAB - 모든 화면에서 음성입력/AI검색 접근
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+class NexusflowFab extends ConsumerStatefulWidget {
+  const NexusflowFab({super.key});
+
+  @override
+  ConsumerState<NexusflowFab> createState() => _NexusflowFabState();
+}
+
+class _NexusflowFabState extends ConsumerState<NexusflowFab>
+    with SingleTickerProviderStateMixin {
+  bool _isExpanded = false;
+  late AnimationController _controller;
+  late Animation<double> _expandAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _expandAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() {
+      _isExpanded = !_isExpanded;
+      if (_isExpanded) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    });
+  }
+
+  void _onVoiceInput() {
+    _toggle();
+    context.push('/record?mode=voice');
+  }
+
+  void _onAiSearch() {
+    _toggle();
+    context.push('/record?mode=ai');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // 음성 입력 버튼
+        ScaleTransition(
+          scale: _expandAnimation,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: FloatingActionButton.small(
+              heroTag: 'fab_voice',
+              backgroundColor: const Color(0xFF2563EB),
+              onPressed: _onVoiceInput,
+              child: const Icon(Icons.mic, color: Colors.white, size: 20),
+            ),
+          ),
+        ),
+        // AI 검색 버튼
+        ScaleTransition(
+          scale: _expandAnimation,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: FloatingActionButton.small(
+              heroTag: 'fab_ai',
+              backgroundColor: const Color(0xFF06B6D4),
+              onPressed: _onAiSearch,
+              child: const Icon(Icons.auto_awesome,
+                  color: Colors.white, size: 20),
+            ),
+          ),
+        ),
+        // 메인 FAB
+        FloatingActionButton(
+          heroTag: 'fab_main',
+          backgroundColor: const Color(0xFF16213E),
+          onPressed: _toggle,
+          child: AnimatedRotation(
+            turns: _isExpanded ? 0.125 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: const Icon(Icons.add, color: Colors.white),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+
+=== 파일 2 ===
+경로: E:\FluxStudio\NexusFlow\lib\flow_core\overlay\floating_overlay_service.dart
+
+// 플로팅 오버레이 서비스 - 스크린샷/SMS 감지 시 다른 앱 위에 표시
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+class FloatingOverlayService {
+  static const _channel = MethodChannel('nexusflow/overlay');
+
+  static FloatingOverlayService? _instance;
+  static FloatingOverlayService get instance =>
+      _instance ??= FloatingOverlayService._();
+  FloatingOverlayService._();
+
+  bool _isShowing = false;
+  bool get isShowing => _isShowing;
+
+  /// 오버레이 권한 확인
+  Future<bool> hasPermission() async {
+    try {
+      final result = await _channel.invokeMethod<bool>('hasOverlayPermission');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 오버레이 권한 요청 (설정 화면으로 이동)
+  Future<void> requestPermission() async {
+    try {
+      await _channel.invokeMethod('requestOverlayPermission');
+    } catch (_) {}
+  }
+
+  /// 플로팅 오버레이 표시
+  /// [title] 오버레이 제목
+  /// [extractedData] AI 추출 결과 (null이면 분석 중 상태)
+  Future<void> show({
+    required String title,
+    required String sourceType,
+    Map<String, dynamic>? extractedData,
+    Function(Map<String, dynamic>)? onSave,
+    VoidCallback? onDismiss,
+  }) async {
+    if (_isShowing) return;
+    _isShowing = true;
+
+    try {
+      await _channel.invokeMethod('showOverlay', {
+        'title': title,
+        'sourceType': sourceType,
+        'extractedData': extractedData,
+      });
+    } catch (_) {
+      _isShowing = false;
+    }
+  }
+
+  /// 플로팅 오버레이 숨기기
+  Future<void> hide() async {
+    if (!_isShowing) return;
+    try {
+      await _channel.invokeMethod('hideOverlay');
+    } catch (_) {}
+    _isShowing = false;
+  }
+
+  /// 오버레이 결과 스트림 수신
+  Stream<Map<String, dynamic>> get overlayResults {
+    return const EventChannel('nexusflow/overlay_results')
+        .receiveBroadcastStream()
+        .map((event) => Map<String, dynamic>.from(event as Map));
+  }
+}
+
+
+=== 파일 3 ===
+경로: E:\FluxStudio\NexusFlow\lib\flow_core\ocr\screenshot_detector_service.dart
+
+// 스크린샷 감지 서비스 - MediaStore 변경 감지 후 관련성 판별
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+class ScreenshotDetectorService {
+  static const _channel = MethodChannel('nexusflow/screenshot');
+  static const _eventChannel = EventChannel('nexusflow/screenshot_events');
+
+  static ScreenshotDetectorService? _instance;
+  static ScreenshotDetectorService get instance =>
+      _instance ??= ScreenshotDetectorService._();
+  ScreenshotDetectorService._();
+
+  bool _isRunning = false;
+  bool get isRunning => _isRunning;
+
+  /// 감지 시작
+  Future<void> start({
+    required List<String> keywords,
+    required List<String> accountNames,
+    required List<String> contactNames,
+  }) async {
+    if (_isRunning) return;
+    try {
+      await _channel.invokeMethod('startDetection', {
+        'keywords': keywords,
+        'accountNames': accountNames,
+        'contactNames': contactNames,
+      });
+      _isRunning = true;
+    } catch (_) {}
+  }
+
+  /// 감지 중지
+  Future<void> stop() async {
+    if (!_isRunning) return;
+    try {
+      await _channel.invokeMethod('stopDetection');
+    } catch (_) {}
+    _isRunning = false;
+  }
+
+  /// 스크린샷 감지 이벤트 스트림
+  /// 관련성 있는 스크린샷만 이벤트 발생
+  Stream<ScreenshotDetectedEvent> get detectionStream {
+    return _eventChannel.receiveBroadcastStream().map((event) {
+      final map = Map<String, dynamic>.from(event as Map);
+      return ScreenshotDetectedEvent(
+        imagePath: map['imagePath'] as String,
+        ocrText: map['ocrText'] as String,
+        matchedKeywords: List<String>.from(map['matchedKeywords'] as List),
+        detectedAt: DateTime.parse(map['detectedAt'] as String),
+      );
+    });
+  }
+
+  /// 키워드 업데이트 (거래처/담당자 추가 시)
+  Future<void> updateKeywords({
+    required List<String> keywords,
+    required List<String> accountNames,
+    required List<String> contactNames,
+  }) async {
+    try {
+      await _channel.invokeMethod('updateKeywords', {
+        'keywords': keywords,
+        'accountNames': accountNames,
+        'contactNames': contactNames,
+      });
+    } catch (_) {}
+  }
+}
+
+class ScreenshotDetectedEvent {
+  const ScreenshotDetectedEvent({
+    required this.imagePath,
+    required this.ocrText,
+    required this.matchedKeywords,
+    required this.detectedAt,
+  });
+
+  final String imagePath;
+  final String ocrText;
+  final List<String> matchedKeywords;
+  final DateTime detectedAt;
+}
+
+final screenshotDetectorProvider =
+    Provider<ScreenshotDetectorService>((ref) {
+  return ScreenshotDetectorService.instance;
+});
+
+완료되면 파일별 줄 수와 MASTER_PLAN 업데이트 여부 알려줘.
