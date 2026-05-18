@@ -8,6 +8,14 @@
 - 사용자가 명시적으로 다른 언어를 요청한 경우에만 그 언어를 사용한다.
 - 한국어가 터미널에서 깨져 보이면 UTF-8로 다시 읽은 뒤 판단한다.
 
+## Model routing
+- Default behavior: route work by task complexity automatically, even if the user names a model.
+- Planner/Main for non-trivial work: `gpt-5.5`.
+- Worker agents for general execution, code edits, and test updates: `gpt-5.3-codex-spark`.
+- Complex refactors, architecture changes, or hard bugs: escalate to `gpt-5.4-mini` or higher.
+- Review / verification: default `gpt-5.3-codex-spark`; use `gpt-5.4-mini` for high-risk changes.
+- If the exact model cannot be selected in the current environment, keep the same role split and report the limitation.
+
 ## 프로젝트 정체성
 - NexusFlow는 단순 CRM, 메모앱, 회의록 앱, AI 챗봇이 아니다.
 - NexusFlow는 AI가 관계 데이터를 구조화하고, 누구를 왜 언제 만나야 하는지 추천하는 모바일 우선 AI Relationship Operating System이다.
