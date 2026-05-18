@@ -1,3 +1,405 @@
-class ValidationScreen {
-  // TODO: implement
+// 검수 화면 - LOW Confidence 항목 상세 검수
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../widgets/confidence_badge.dart';
+import '../../nexusflow_core/industry_modes/industry_mode_service.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/settings_provider.dart';
+
+class ValidationScreen extends ConsumerStatefulWidget {
+  const ValidationScreen({super.key, required this.extractionId});
+  final String extractionId;
+
+  @override
+  ConsumerState<ValidationScreen> createState() => _ValidationScreenState();
+}
+
+class _ValidationScreenState extends ConsumerState<ValidationScreen> {
+  Map<String, dynamic>? _extraction;
+  Map<String, dynamic> _editedData = {};
+  bool _isLoading = true;
+  bool _isSaving = false;
+  bool _showLearnOption = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExtraction();
+  }
+
+  Future<void> _loadExtraction() async {
+    final result = await Supabase.instance.client
+        .schema('nexusflow')
+        .from('ai_extractions')
+        .select('extracted_data, confidence_score, confidence_level')
+        .eq('id', widget.extractionId)
+        .single();
+
+    final rawData = result['extracted_data'];
+    final data = rawData is String
+        ? jsonDecode(rawData) as Map<String, dynamic>
+        : Map<String, dynamic>.from(rawData as Map);
+
+    setState(() {
+      _extraction = result;
+      _editedData = data;
+      _isLoading = false;
+      _showLearnOption = true;
+    });
+  }
+
+  Future<void> _save({bool learnPatterns = false}) async {
+    setState(() => _isSaving = true);
+
+    await Supabase.instance.client
+        .schema('nexusflow')
+        .from('ai_extractions')
+        .update({
+          'extracted_data': jsonEncode(_editedData),
+          'status': 'confirmed',
+        })
+        .eq('id', widget.extractionId);
+
+    await Supabase.instance.client
+        .schema('nexusflow')
+        .from('validation_queue')
+        .update({'queue_status': 'resolved', 'resolved_at': DateTime.now().toIso8601String()})
+        .eq('extraction_id', widget.extractionId);
+
+    if (learnPatterns) {
+      await _learnPatterns();
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✓ 저장됐어요.')),
+      );
+      context.pop();
+    }
+  }
+
+  Future<void> _learnPatterns() async {
+    final mode = ref.read(industryModeProvider);
+    final modeService = ref.read(industryModeServiceProvider);
+    if (modeService == null) return;
+
+    final account = _editedData['account'];
+    if (account is Map && account['name'] != null) {
+      await modeService.updateLearning(
+        term: account['name'].toString(),
+        meaning: '거래처명',
+        mode: mode,
+      );
+    }
+
+    final contact = _editedData['contact'];
+    if (contact is Map && contact['name'] != null) {
+      await modeService.updateLearning(
+        term: contact['name'].toString(),
+        meaning: '담당자명',
+        mode: mode,
+      );
+    }
+  }
+
+  void _updateField(String key, String subKey, String value) {
+    setState(() {
+      if (_editedData[key] is Map) {
+        _editedData[key] = {
+          ...(_editedData[key] as Map<String, dynamic>),
+          subKey: value,
+        };
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8FAFC),
+        elevation: 0,
+        title: const Text(
+          '내용 확인',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF16213E),
+          ),
+        ),
+        actions: [
+          if (_extraction != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: ConfidenceBadge(
+                  confidence: (_extraction!['confidence_score'] as num)
+                      .toDouble(),
+                ),
+              ),
+            ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'AI가 추출한 내용을 확인하고 수정해주세요.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _ValidationField(
+                          label: '거래처',
+                          icon: Icons.business,
+                          value: (_editedData['account'] as Map?)?['name']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['account'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('account', 'name', v),
+                        ),
+                        _ValidationField(
+                          label: '담당자',
+                          icon: Icons.person,
+                          value: (_editedData['contact'] as Map?)?['name']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['contact'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('contact', 'name', v),
+                        ),
+                        _ValidationField(
+                          label: '제품',
+                          icon: Icons.medication,
+                          value: (_editedData['product'] as Map?)?['name']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['product'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('product', 'name', v),
+                        ),
+                        _ValidationField(
+                          label: '일정',
+                          icon: Icons.calendar_today,
+                          value: (_editedData['schedule'] as Map?)?['date']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['schedule'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('schedule', 'date', v),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'AI 요약',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF334155),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Text(
+                            _editedData['summary']?.toString() ?? '',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF334155),
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                        if (_showLearnOption) ...[
+                          const SizedBox(height: 20),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: const Color(0xFFBFDBFE)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.school_outlined,
+                                    size: 18,
+                                    color: Color(0xFF2563EB)),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    '이 패턴을 기억할까요?\n다음부터 자동으로 인식해요.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF1D4ED8),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () => _save(learnPatterns: true),
+                                  child: const Text(
+                                    '저장 + 학습',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => context.pop(),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text('나중에'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton(
+                          onPressed: _isSaving ? null : () => _save(),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2563EB),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: _isSaving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  '저장',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _ValidationField extends StatelessWidget {
+  const _ValidationField({
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.confidence,
+    required this.onChanged,
+  });
+
+  final String label;
+  final IconData icon;
+  final String value;
+  final double confidence;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: const Color(0xFF64748B)),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF334155),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ConfidenceBadge(
+                confidence: confidence,
+                showLabel: false,
+                size: ConfidenceBadgeSize.small,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          TextFormField(
+            initialValue: value,
+            onChanged: onChanged,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF16213E),
+            ),
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF2563EB)),
+              ),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -1,455 +1,429 @@
-아래 4개 파일을 각각 덮어써줘 (기존 내용 완전 교체).
+아래 파일을 덮어써줘 (기존 내용 완전 교체).
 
 === 파일 1 ===
-경로: E:\FluxStudio\NexusFlow\lib\flow_core\ocr\ocr_service.dart
+경로: E:\FluxStudio\NexusFlow\lib\screens\record\validation_screen.dart
 
-// OCR 서비스 - ML Kit 기반 on-device 텍스트 인식
-import 'dart:io';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-class OcrService {
-  static OcrService? _instance;
-  static OcrService get instance => _instance ??= OcrService._();
-  OcrService._();
-
-  final TextRecognizer _recognizer = TextRecognizer(
-    script: TextRecognitionScript.korean,
-  );
-
-  /// 이미지 파일에서 텍스트 추출
-  Future<OcrResult> extractText(String imagePath) async {
-    try {
-      final inputImage = InputImage.fromFile(File(imagePath));
-      final recognized = await _recognizer.processImage(inputImage);
-      final text = recognized.text.trim();
-      return OcrResult(
-        text: text,
-        success: text.isNotEmpty,
-        imagePath: imagePath,
-      );
-    } catch (e) {
-      return OcrResult(
-        text: '',
-        success: false,
-        imagePath: imagePath,
-        error: e.toString(),
-      );
-    }
-  }
-
-  /// 텍스트에서 관련성 판별 (Dictionary 키워드 + 거래처명 매칭)
-  bool isRelevant({
-    required String text,
-    required List<String> keywords,
-    required List<String> accountNames,
-    required List<String> contactNames,
-  }) {
-    if (text.isEmpty) return false;
-    final lowerText = text.toLowerCase();
-
-    for (final keyword in keywords) {
-      if (lowerText.contains(keyword.toLowerCase())) return true;
-    }
-    for (final name in accountNames) {
-      if (name.length >= 2 && lowerText.contains(name.toLowerCase())) {
-        return true;
-      }
-    }
-    for (final name in contactNames) {
-      if (name.length >= 2 && lowerText.contains(name.toLowerCase())) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  void dispose() {
-    _recognizer.close();
-  }
-}
-
-class OcrResult {
-  const OcrResult({
-    required this.text,
-    required this.success,
-    required this.imagePath,
-    this.error,
-  });
-
-  final String text;
-  final bool success;
-  final String imagePath;
-  final String? error;
-}
-
-final ocrServiceProvider = Provider<OcrService>((ref) {
-  return OcrService.instance;
-});
-
-
-=== 파일 2 ===
-경로: E:\FluxStudio\NexusFlow\lib\nexusflow_core\secure_vault\secure_vault_service.dart
-
-// Secure Vault 서비스 - 민감 개인정보 암호화 저장
+// 검수 화면 - LOW Confidence 항목 상세 검수
 import 'dart:convert';
-import 'package:crypto/crypto.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../providers/auth_provider.dart';
-
-class SecureVaultService {
-  SecureVaultService({
-    required this.supabase,
-    required this.userId,
-  });
-
-  final SupabaseClient supabase;
-  final String userId;
-
-  static const _storage = FlutterSecureStorage();
-  static const _keyPrefix = 'nexusflow_vault_';
-
-  /// 민감 정보 저장
-  Future<void> store({
-    required String contactId,
-    required VaultDataType dataType,
-    required String value,
-  }) async {
-    // 암호화 키 생성 (userId + contactId 기반)
-    final keyHint = _generateKeyHint(contactId);
-    final encrypted = _encrypt(value, keyHint);
-
-    // Supabase에 암호화된 값 저장
-    await supabase.schema('nexusflow').from('contact_secure_vault').upsert({
-      'contact_id': contactId,
-      'data_type': dataType.name,
-      'encrypted_value': encrypted,
-      'encryption_key_hint': keyHint,
-      'data_source_consent_type': 'user_input',
-    });
-
-    // 로컬 복호화 키 안전 저장
-    await _storage.write(
-      key: '$_keyPrefix${contactId}_${dataType.name}',
-      value: keyHint,
-    );
-  }
-
-  /// 민감 정보 조회 (복호화)
-  Future<String?> retrieve({
-    required String contactId,
-    required VaultDataType dataType,
-  }) async {
-    try {
-      final result = await supabase
-          .schema('nexusflow')
-          .from('contact_secure_vault')
-          .select('encrypted_value, encryption_key_hint')
-          .eq('contact_id', contactId)
-          .eq('data_type', dataType.name)
-          .maybeSingle();
-
-      if (result == null) return null;
-
-      final keyHint = result['encryption_key_hint'] as String;
-      return _decrypt(result['encrypted_value'] as String, keyHint);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// 마스킹된 값 반환 (인증 없이 표시용)
-  String mask(String value, VaultDataType dataType) {
-    switch (dataType) {
-      case VaultDataType.phone:
-        if (value.length >= 8) {
-          return '${value.substring(0, 3)}-****-${value.substring(value.length - 4)}';
-        }
-        return '****';
-      case VaultDataType.birthday:
-        if (value.length >= 6) {
-          return '${value.substring(0, 2)}.**.**';
-        }
-        return '**.**.**';
-      default:
-        if (value.length <= 4) return '****';
-        return '${value.substring(0, 2)}${'*' * (value.length - 4)}${value.substring(value.length - 2)}';
-    }
-  }
-
-  /// 민감 정보 삭제
-  Future<void> delete({
-    required String contactId,
-    required VaultDataType dataType,
-  }) async {
-    await supabase
-        .schema('nexusflow')
-        .from('contact_secure_vault')
-        .delete()
-        .eq('contact_id', contactId)
-        .eq('data_type', dataType.name);
-
-    await _storage.delete(
-      key: '$_keyPrefix${contactId}_${dataType.name}',
-    );
-  }
-
-  String _generateKeyHint(String contactId) {
-    final raw = '$userId:$contactId:nexusflow';
-    return sha256.convert(utf8.encode(raw)).toString().substring(0, 16);
-  }
-
-  String _encrypt(String value, String key) {
-    // 간단한 XOR 기반 암호화 (실제 배포 시 AES로 교체 권장)
-    final keyBytes = utf8.encode(key);
-    final valueBytes = utf8.encode(value);
-    final encrypted = List<int>.generate(
-      valueBytes.length,
-      (i) => valueBytes[i] ^ keyBytes[i % keyBytes.length],
-    );
-    return base64.encode(encrypted);
-  }
-
-  String _decrypt(String encrypted, String key) {
-    final keyBytes = utf8.encode(key);
-    final encryptedBytes = base64.decode(encrypted);
-    final decrypted = List<int>.generate(
-      encryptedBytes.length,
-      (i) => encryptedBytes[i] ^ keyBytes[i % keyBytes.length],
-    );
-    return utf8.decode(decrypted);
-  }
-}
-
-enum VaultDataType {
-  phone,
-  address,
-  birthday,
-  family,
-  insurance,
-  email,
-}
-
-final secureVaultServiceProvider = Provider<SecureVaultService?>((ref) {
-  final userId = ref.watch(currentUserIdProvider);
-  if (userId == null) return null;
-  return SecureVaultService(
-    supabase: Supabase.instance.client,
-    userId: userId,
-  );
-});
-
-
-=== 파일 3 ===
-경로: E:\FluxStudio\NexusFlow\lib\flow_core\supabase_client\supabase_config.dart
-
-// Supabase 설정 - NexusFlow schema 기반 클라이언트
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-class SupabaseConfig {
-  static SupabaseClient get client => Supabase.instance.client;
-
-  // nexusflow schema 테이블 접근 헬퍼
-  static dynamic nexusflow(String table) =>
-      client.schema('nexusflow').from(table);
-
-  // planflow schema 테이블 접근 헬퍼 (PlanFlow 연동용)
-  static dynamic planflow(String table) =>
-      client.schema('planflow').from(table);
-
-  // shared schema 테이블 접근 헬퍼
-  static dynamic shared(String table) =>
-      client.schema('shared').from(table);
-
-  // 현재 로그인 유저 ID
-  static String? get currentUserId =>
-      client.auth.currentUser?.id;
-
-  // 인증 상태 스트림
-  static Stream<AuthState> get authStream =>
-      client.auth.onAuthStateChange;
-
-  // Google 로그인
-  static Future<void> signInWithGoogle() async {
-    await client.auth.signInWithOAuth(OAuthProvider.google);
-  }
-
-  // 로그아웃
-  static Future<void> signOut() async {
-    await client.auth.signOut();
-  }
-}
-
-final supabaseClientProvider = Provider<SupabaseClient>((ref) {
-  return Supabase.instance.client;
-});
-
-
-=== 파일 4 ===
-경로: E:\FluxStudio\NexusFlow\lib\nexusflow_core\industry_modes\industry_mode_service.dart
-
-// 업종 모드 서비스 - Dictionary/QuickAction/Prompt 업종별 관리
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../widgets/confidence_badge.dart';
+import '../../nexusflow_core/industry_modes/industry_mode_service.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/settings_provider.dart';
 
-class IndustryModeService {
-  IndustryModeService({
-    required this.supabase,
-    required this.userId,
-  });
+class ValidationScreen extends ConsumerStatefulWidget {
+  const ValidationScreen({super.key, required this.extractionId});
+  final String extractionId;
 
-  final SupabaseClient supabase;
-  final String userId;
+  @override
+  ConsumerState<ValidationScreen> createState() => _ValidationScreenState();
+}
 
-  // 업종 모드 정보
-  static const Map<String, IndustryModeInfo> modeInfos = {
-    'pharma': IndustryModeInfo(
-      code: 'pharma',
-      label: '제약영업',
-      description: '병원/의원 담당 MR',
-      icon: '💊',
-    ),
-    'insurance': IndustryModeInfo(
-      code: 'insurance',
-      label: '보험영업',
-      description: '보험설계사',
-      icon: '🛡️',
-    ),
-    'general': IndustryModeInfo(
-      code: 'general',
-      label: '공통영업',
-      description: '일반 B2B 영업사원',
-      icon: '💼',
-    ),
-  };
+class _ValidationScreenState extends ConsumerState<ValidationScreen> {
+  Map<String, dynamic>? _extraction;
+  Map<String, dynamic> _editedData = {};
+  bool _isLoading = true;
+  bool _isSaving = false;
+  bool _showLearnOption = false;
 
-  /// 현재 업종 모드 정보 반환
-  IndustryModeInfo getModeInfo(String mode) {
-    return modeInfos[mode] ?? modeInfos['general']!;
+  @override
+  void initState() {
+    super.initState();
+    _loadExtraction();
   }
 
-  /// 업종별 Dictionary 로드
-  Future<List<Map<String, dynamic>>> loadDictionary(String mode) async {
-    final result = await supabase
+  Future<void> _loadExtraction() async {
+    final result = await Supabase.instance.client
         .schema('nexusflow')
-        .from('term_dictionary')
-        .select('term, meaning, dict_scope')
-        .or('industry_mode.eq.$mode,industry_mode.eq.general')
-        .eq('is_active', true)
-        .order('dict_scope');
-    return List<Map<String, dynamic>>.from(result);
+        .from('ai_extractions')
+        .select('extracted_data, confidence_score, confidence_level')
+        .eq('id', widget.extractionId)
+        .single();
+
+    final rawData = result['extracted_data'];
+    final data = rawData is String
+        ? jsonDecode(rawData) as Map<String, dynamic>
+        : Map<String, dynamic>.from(rawData as Map);
+
+    setState(() {
+      _extraction = result;
+      _editedData = data;
+      _isLoading = false;
+      _showLearnOption = true;
+    });
   }
 
-  /// 업종별 Quick Actions 로드
-  Future<List<Map<String, dynamic>>> loadQuickActions(String mode) async {
-    final result = await supabase
+  Future<void> _save({bool learnPatterns = false}) async {
+    setState(() => _isSaving = true);
+
+    // 수정된 데이터로 업데이트
+    await Supabase.instance.client
         .schema('nexusflow')
-        .from('quick_actions')
-        .select('label, action_type')
-        .or('industry_mode.eq.$mode,industry_mode.eq.general')
-        .order('label');
-    return List<Map<String, dynamic>>.from(result);
-  }
+        .from('ai_extractions')
+        .update({
+          'extracted_data': jsonEncode(_editedData),
+          'status': 'confirmed',
+        })
+        .eq('id', widget.extractionId);
 
-  /// 사용자 업종 모드 저장
-  Future<void> saveUserMode(String mode) async {
-    await supabase
+    // validation_queue 처리
+    await Supabase.instance.client
         .schema('nexusflow')
-        .from('industry_modes')
-        .upsert({
-          'user_id': userId,
-          'mode_type': mode,
-          'is_active': true,
-        });
-  }
+        .from('validation_queue')
+        .update({'queue_status': 'resolved', 'resolved_at': DateTime.now().toIso8601String()})
+        .eq('extraction_id', widget.extractionId);
 
-  /// 사용자 업종 모드 로드
-  Future<String> loadUserMode() async {
-    final result = await supabase
-        .schema('nexusflow')
-        .from('industry_modes')
-        .select('mode_type')
-        .eq('user_id', userId)
-        .eq('is_active', true)
-        .maybeSingle();
-    return result?['mode_type'] as String? ?? 'general';
-  }
+    // Dictionary 학습
+    if (learnPatterns) {
+      await _learnPatterns();
+    }
 
-  /// Dictionary 학습 업데이트 (3회 확인 → User 승격)
-  Future<void> updateLearning({
-    required String term,
-    required String meaning,
-    required String mode,
-  }) async {
-    // 기존 learned 항목 확인
-    final existing = await supabase
-        .schema('nexusflow')
-        .from('term_dictionary')
-        .select('id, confidence_count, dict_scope')
-        .eq('user_id', userId)
-        .eq('term', term)
-        .maybeSingle();
-
-    if (existing == null) {
-      // 신규 learned 항목 생성
-      await supabase.schema('nexusflow').from('term_dictionary').insert({
-        'user_id': userId,
-        'industry_mode': mode,
-        'term': term,
-        'meaning': meaning,
-        'dict_scope': 'learned',
-        'confidence_count': 1,
-        'is_active': true,
-      });
-    } else {
-      final count = (existing['confidence_count'] as int? ?? 0) + 1;
-      final newScope = count >= 3 ? 'user' : 'learned';
-
-      await supabase
-          .schema('nexusflow')
-          .from('term_dictionary')
-          .update({
-            'confidence_count': count,
-            'dict_scope': newScope,
-            'promoted_from': count == 3 ? 'learned' : null,
-          })
-          .eq('id', existing['id']);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✓ 저장됐어요.')),
+      );
+      context.pop();
     }
   }
+
+  Future<void> _learnPatterns() async {
+    final mode = ref.read(industryModeProvider);
+    final modeService = ref.read(industryModeServiceProvider);
+    if (modeService == null) return;
+
+    final account = _editedData['account'];
+    if (account is Map && account['name'] != null) {
+      await modeService.updateLearning(
+        term: account['name'].toString(),
+        meaning: '거래처명',
+        mode: mode,
+      );
+    }
+
+    final contact = _editedData['contact'];
+    if (contact is Map && contact['name'] != null) {
+      await modeService.updateLearning(
+        term: contact['name'].toString(),
+        meaning: '담당자명',
+        mode: mode,
+      );
+    }
+  }
+
+  void _updateField(String key, String subKey, String value) {
+    setState(() {
+      if (_editedData[key] is Map) {
+        _editedData[key] = {
+          ...(_editedData[key] as Map<String, dynamic>),
+          subKey: value,
+        };
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF8FAFC),
+        elevation: 0,
+        title: const Text(
+          '내용 확인',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF16213E),
+          ),
+        ),
+        actions: [
+          if (_extraction != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: ConfidenceBadge(
+                  confidence: (_extraction!['confidence_score'] as num)
+                      .toDouble(),
+                ),
+              ),
+            ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'AI가 추출한 내용을 확인하고 수정해주세요.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // 거래처
+                        _ValidationField(
+                          label: '거래처',
+                          icon: Icons.business,
+                          value: (_editedData['account'] as Map?)?['name']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['account'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('account', 'name', v),
+                        ),
+
+                        // 담당자
+                        _ValidationField(
+                          label: '담당자',
+                          icon: Icons.person,
+                          value: (_editedData['contact'] as Map?)?['name']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['contact'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('contact', 'name', v),
+                        ),
+
+                        // 제품
+                        _ValidationField(
+                          label: '제품',
+                          icon: Icons.medication,
+                          value: (_editedData['product'] as Map?)?['name']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['product'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('product', 'name', v),
+                        ),
+
+                        // 일정
+                        _ValidationField(
+                          label: '일정',
+                          icon: Icons.calendar_today,
+                          value: (_editedData['schedule'] as Map?)?['date']
+                                  ?.toString() ?? '',
+                          confidence: ((_editedData['schedule'] as Map?)?['confidence'] as num?)
+                                  ?.toDouble() ?? 0,
+                          onChanged: (v) => _updateField('schedule', 'date', v),
+                        ),
+
+                        // 요약
+                        const SizedBox(height: 8),
+                        const Text(
+                          'AI 요약',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF334155),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Text(
+                            _editedData['summary']?.toString() ?? '',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF334155),
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+
+                        // 학습 옵션
+                        if (_showLearnOption) ...[
+                          const SizedBox(height: 20),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: const Color(0xFFBFDBFE)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.school_outlined,
+                                    size: 18,
+                                    color: Color(0xFF2563EB)),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    '이 패턴을 기억할까요?\n다음부터 자동으로 인식해요.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF1D4ED8),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () => _save(learnPatterns: true),
+                                  child: const Text(
+                                    '저장 + 학습',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+
+                // 하단 버튼
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    border: Border(
+                      top: BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => context.pop(),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text('나중에'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton(
+                          onPressed: _isSaving ? null : () => _save(),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2563EB),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: _isSaving
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  '저장',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
 }
 
-class IndustryModeInfo {
-  const IndustryModeInfo({
-    required this.code,
+class _ValidationField extends StatelessWidget {
+  const _ValidationField({
     required this.label,
-    required this.description,
     required this.icon,
+    required this.value,
+    required this.confidence,
+    required this.onChanged,
   });
 
-  final String code;
   final String label;
-  final String description;
-  final String icon;
+  final IconData icon;
+  final String value;
+  final double confidence;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: const Color(0xFF64748B)),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF334155),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ConfidenceBadge(
+                confidence: confidence,
+                showLabel: false,
+                size: ConfidenceBadgeSize.small,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          TextFormField(
+            initialValue: value,
+            onChanged: onChanged,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF16213E),
+            ),
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF2563EB)),
+              ),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
-
-final industryModeServiceProvider = Provider<IndustryModeService?>((ref) {
-  final userId = ref.watch(currentUserIdProvider);
-  if (userId == null) return null;
-  return IndustryModeService(
-    supabase: Supabase.instance.client,
-    userId: userId,
-  );
-});
-
-final industryModeInfoProvider = Provider<IndustryModeInfo>((ref) {
-  final mode = ref.watch(industryModeProvider);
-  return IndustryModeService.modeInfos[mode] ??
-      IndustryModeService.modeInfos['general']!;
-});
 
 완료되면 파일별 줄 수와 MASTER_PLAN 업데이트 여부 알려줘.

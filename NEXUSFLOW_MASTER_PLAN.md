@@ -229,9 +229,9 @@ services/                 감지 서비스
 - [ ] 거래처 목록 화면
 - [ ] 거래처 상세 화면 (Health Score + 타임라인)
 - [ ] 담당자 상세 화면
-- [ ] 기록 화면 (음성/텍스트/파일)
-- [ ] 확인 모달 (MID Confidence)
-- [ ] 검수 화면 (LOW Confidence)
+- [x] 기록 화면 (음성/텍스트/파일)
+- [x] 확인 모달 (MID Confidence)
+- [x] 검수 화면 (LOW Confidence)
 - [ ] 인사이트 목록/상세
 - [ ] 설정 화면
 - [ ] 온보딩 (동의 → 모드선택 → 데이터가져오기)
@@ -240,7 +240,7 @@ services/                 감지 서비스
 ### 공통 컴포넌트
 - [x] NexusflowFab (글로벌 FAB)
 - [x] 플로팅 오버레이
-- [ ] Confidence 배지
+- [x] Confidence 배지
 - [x] Health Score 위젯
 
 ### Flow Core
