@@ -84,6 +84,7 @@
 - AI_WIKI가 실행하는 큰 빌드, 테스트, 대량 검색, 장시간 동기화는 가능하면 `scripts/invoke-guarded-task.ps1` 또는 `wiki guarded`를 통해 실행한다.
 - 전체 메모리 사용량이 70% 이상이거나 예상 작업 메모리를 더했을 때 70%를 넘으면 큰 작업을 즉시 실행하지 않고 리소스 큐에 넣는다.
 - 큐에 쌓인 작업은 FIFO 순서로 처리하고, 실행해도 70%를 넘지 않을 때만 시작한다.
+- 같은 작업이 반복 입력되면 `cwd + category + command` 기준으로 동일 여부를 판단하고, 이미 대기 중이거나 실행 중인 작업은 새로 쌓지 않고 스킵한다.
 - 현재 상태는 `wiki resource` 또는 `wiki queue`로 확인한다.
 - 메모리가 70%를 넘으면 큰 프로세스부터 종료하지 않는다. 먼저 Phone Link, Steam WebHelper, Discord, Teams, Epic, qBittorrent처럼 코딩 작업과 무관한 백그라운드 앱과 오래된 잔여 서버/데몬을 정리한다.
 - 그래도 70%를 넘으면 큰 프로세스는 자동 종료하지 않고 후보로만 보고한다. 현재 작업 중인 Codex 세션, 빌드, 테스트, dev server, 브라우저 작업은 사용자가 명시하지 않는 한 종료하지 않는다.
@@ -302,3 +303,11 @@ lib/
 - 어떤 검증을 실행했는지, 통과/실패/차단 여부를 보고한다.
 - 커밋과 푸시 여부를 보고한다.
 - 남은 위험이나 다음에 필요한 작업이 있으면 짧게 적는다.
+
+## FluxOS 안전 게이트
+- 루트 FluxOS 또는 다른 세션에서 내려온 작업이라도, 코드 수정 전 `python E:\FluxStudio\.fluxos\run.py preflight --project NexusFlow` 결과를 확인한다.
+- 수정 예정 범위는 `python E:\FluxStudio\.fluxos\run.py claim NexusFlow "<file-glob>" --owner "<세션명>"`으로 잠그고, 완료/중단 시 `release <lock-id>`로 반납한다.
+- 다른 세션 잠금, 동일 파일 dirty 상태, 실행 중인 빌드/테스트가 있으면 기존 세션 작업을 우선하고 대기한다.
+- Gradle/Flutter build/test는 NexusFlow 안에서 동시에 하나만 실행한다.
+- Gradle 설정, wrapper, generated/ephemeral 파일, `.dart_tool`, `.gradle`, `build`는 명시적 목적 없이 수정/삭제/커밋하지 않는다.
+- API 키와 토큰은 명령줄, 로그, 보고에 원문 출력하지 않는다.
