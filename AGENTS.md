@@ -22,6 +22,15 @@
 # Codex Common Rules
 <!-- 프로젝트 공통 Codex 작업 규칙 -->
 
+## FluxOS Pipeline Gate
+- FluxStudio 계열 프로젝트에서 사용자가 개발, 수정, 분석, 리뷰가 필요한 비단순 지시를 내리면 먼저 FluxOS 파이프라인을 사용한다.
+- 표준 흐름은 `Claude Code 계획 -> Codex 구현 -> Claude Code 리뷰 -> CEO 보고`다.
+- 프로젝트 세션이 직접 코드를 수정해야 하는 경우에도 수정 전 `python E:\FluxStudio\.fluxos\run.py pipeline "<지시내용>" --project <Project> --source <session>` 또는 이미 생성된 task의 `pipeline-audit` 결과를 확인한다.
+- 진행 확인은 `python E:\FluxStudio\.fluxos\run.py pipeline-audit [TASK_ID]`를 사용하고, 최소한 `Claude Code 계획` 단계가 생성됐는지 확인한 뒤 구현에 들어간다.
+- Claude Code가 인증, 한도, 연결 문제로 실패하면 FluxOS의 Codex-only fallback을 사용하되, 최종 보고에 fallback 사유를 명시한다.
+- 긴급 단순 수정으로 파이프라인을 생략한 경우에는 생략 사유, 변경 범위, 검증 결과를 최종 보고에 반드시 남긴다.
+- 프로젝트 세션을 직접 열어야 하는 경우에도 먼저 `python E:\FluxStudio\.fluxos\run.py session start --project <Project> --source <session> --label "<세션명>" --cwd "<프로젝트경로>"` 또는 기존 세션에 `session attach`로 FluxOS 메타를 붙이고, 가능하면 `FLUXOS_SESSION_ID`, `FLUXOS_SESSION_PROJECT`, `FLUXOS_SESSION_TASK_ID`, `FLUXOS_SESSION_OWNER`, `FLUXOS_SESSION_SOURCE`, `FLUXOS_SESSION_LABEL`, `FLUXOS_SESSION_NOTE`, `FLUXOS_SESSION_CWD`를 함께 전달한다.
+
 ## 기본 원칙
 - 기본 응답 언어는 한국어다.
 - 여기에 남길 규칙은 둘 이상의 프로젝트군에서 재사용되는 것만 둔다.
@@ -29,6 +38,11 @@
 - 세션 시작 시 `.planning/STATE.md`, `.planning/context/ACTIVE_SUMMARY.md`, `node scripts/gsd-context-hygiene.mjs`를 확인한다.
 - 모든 작업을 진행하기 이전에 이전 대화 기록과 현재 작업 맥락을 먼저 컨텍스트 압축한 뒤 진행한다.
 - 한글 중심 작업 환경이므로 모든 파일 읽기/쓰기는 UTF-8을 기준으로 처리하고, 한글이 깨지지 않게 확인한다.
+- PowerShell에서 한글 파일을 읽거나 쓸 때는 `Get-Content -Encoding UTF8`, `Set-Content -Encoding UTF8`, `[System.IO.File]::ReadAllText(..., [System.Text.Encoding]::UTF8)`, `[System.IO.File]::WriteAllText(..., [System.Text.Encoding]::UTF8)`처럼 인코딩을 명시한다.
+- `type`, `more`, `echo > file`, 기본 인코딩의 `Get-Content`/`Set-Content`, Python/Node의 기본 인코딩 추정처럼 코드페이지에 의존하는 방식으로 한글 문서를 읽거나 쓰지 않는다.
+- 이미 글자가 깨져 보이면 그 상태로 저장하지 말고 즉시 중단한 뒤 UTF-8로 다시 읽어 원문을 확인한다.
+- PowerShell 명령에서는 `&&`를 쓰지 않는다. 여러 명령을 이어야 하면 명령을 분리해서 실행하거나, PowerShell 네이티브 방식인 세미콜론과 `$LASTEXITCODE`/`if ($?) { ... }` 조건문을 사용한다.
+- Bash/CMD 전용 체이닝 문법을 PowerShell에 그대로 가져오지 않는다. 특히 `cmd /c`, `bash -lc`로 우회해 삭제/이동/생성 같은 파일 작업을 섞어 실행하지 않는다.
 
 ## 모델 라우팅과 병렬 처리
 - 비단순 작업은 계획 -> 병렬 작업자 -> 별도 리뷰어 -> 수정 -> 재리뷰 순서로 진행한다.
@@ -39,9 +53,17 @@
 - 파일, 모듈, 서브시스템이 겹치지 않으면 워커를 동시에 띄우고 병렬 완료를 우선한다.
 - 병렬 작업 후 자기 할 일이 끝난 서브에이전트는 즉시 닫는다.
 - 완료된 서브에이전트를 띄워둔 채로 방치하지 않고, 다음 병렬 작업에 자원을 바로 쓸 수 있게 한다.
+- 비단순 작업의 구현 단계는 메인(오케스트레이터) 세션이 직접 코드를 쏟아내지 말고 경량 서브에이전트에 위임한다. 메인 세션은 계획·분배·검토·보고만 담당하고, 실제 구현과 반복 작업은 난이도에 맞는 서브에이전트(단순=경량 모델, 난도 높음=중간 모델)로 병렬 위임해 비용을 낮춘다. 이것이 기본값이며, 사용자가 따로 지시하지 않아도 비단순 구현은 위임을 우선한다.
+- 메인 세션은 자기 모델을 임의로 바꿀 수 없으므로, "계획은 상위 모델 / 구현은 경량"을 달성하려면 반드시 서브에이전트 위임을 사용한다. 메인 모델 자체를 낮추려면 사용자가 직접 모델을 전환해야 한다.
+- 다만 도구/하네스 정책이 불필요한 서브에이전트 생성을 억제할 수 있어 위임이 자동으로 항상 적용되지는 않는다. 위임이 확실히 필요한 작업이면 사용자가 "구현은 서브에이전트로" 같은 트리거를 주거나, 작업 시작 시 위임 방침을 명시한다.
 
 ## 작업 방식
 - 기존 코드, 기존 문서, 기존 구조를 먼저 확인한다.
+- 모든 파일 수정 전에는 FluxOS 잠금 상태를 확인하고, 같은 프로젝트에 active 작업이 있으면 새 작업을 직접 시작하지 않고 지시사항 단위로 FIFO 큐에 넣는다.
+- 큐 대기는 파일 하나가 풀렸는지가 아니라 앞선 지시사항 전체가 완료되어 release될 때까지 유지한다. 앞 작업이 여러 파일을 수정 중이면 그중 일부 파일이 먼저 끝났더라도 다음 지시는 시작하지 않는다.
+- 큐에 올라간 지시사항은 앞 작업 release 후 첫 번째 대기 항목부터 순서대로 active로 승격하고, 필요한 payload가 있으면 그때 실행한다.
+- FluxOS 운영은 모든 등록 프로젝트를 독립 lane으로 본다. 같은 프로젝트는 active 지시 1개와 FIFO queue를 유지하지만, 서로 다른 프로젝트는 공용 자원 충돌이 없으면 병렬 진행한다.
+- `AGENTS.md`, `CLAUDE.md` 같은 생성 문서는 다른 세션이 작업 중인 프로젝트에 직접 재생성하지 않고, AI_WIKI 원본만 수정한 뒤 해당 프로젝트 doc-generate 작업을 큐에 적재한다.
 - 새 기능, 화면, 컴포넌트, UI 요소를 추가하기 전에는 반드시 기존 디자인 스타일, CSS, 테마, 토큰, 공용 컴포넌트, 레이아웃 패턴이 있는지 먼저 확인한다.
 - 새 UI는 프로젝트가 이미 쓰는 스타일과 시각 언어에 맞춰 통일해서 개발하고, 기본 브라우저/프레임워크 스타일을 그대로 덧붙이지 않는다.
 - 버튼, 카드, 입력창, 모달, 색상, 간격, 폰트, 아이콘, 상태 표시 등은 기존 앱의 구현 방식을 우선 재사용한다.
@@ -54,6 +76,9 @@
 - Flutter 앱을 에뮬레이터로 실행해야 하거나 연결된 장치가 없으면 `flutter devices`로 먼저 확인하고, 항상 같은 AVD `flux_phone`의 `emulator-5554`에서 `flutter run -d emulator-5554`로 실행한다.
 - `flux_phone`/`emulator-5554`는 한 번에 하나의 세션만 사용한다. 다른 세션이 사용 중이면 새 실행을 직접 시작하지 말고 FIFO 큐에 적재해 앞 세션이 끝난 뒤 다음 세션이 이어서 사용하게 한다.
 - 같은 프로젝트에서 같은 에뮬레이터 실행 요청이 반복 입력되면 큐에 중복으로 쌓지 말고 기존 대기 항목 하나만 유지한다.
+- 실제 Android 기기를 무선 디버깅으로 연결할 때는 `adb connect <ip>:<port>`의 명시 IP 연결을 우선하고, 같은 기기가 `adb-..._adb-tls-connect._tcp` mDNS 항목으로 중복 표시되지 않게 자동 정리한다.
+- ADB/Flutter 실행 전에는 공용 래퍼가 `E:\AI_WIKI\scripts\adb-single-device.ps1`를 자동 호출해 mDNS 자동 연결을 비활성화하고, 같은 기기의 mDNS 중복 연결을 끊어 하나의 device만 유지한다.
+- 무선 디버깅 포트를 고정해서 자동 재연결해야 할 때만 사용자 환경변수 `AI_WIKI_ADB_DEVICE=<ip>:<port>`를 설정한다.
 - 로컬 개발/디버그의 AI 호출은 기본적으로 Hermes 로컬 경로를 우선하고, 배포/릴리즈와 127.0.0.1을 직접 볼 수 없는 런타임은 OpenAI 배포 경로를 우선한다.
 - Hermes 로컬 기본값은 `http://127.0.0.1:8645/v1`, API key 예시는 `hermes-local`이다. 수동 override가 필요할 때만 `OPENAI_BASE_URL`로 바꾼다.
 - FLUXSTUDIO 계열의 공용 AI 호출은 Hermes 기본 경로를 사용하되, PlanFlow는 이번 자동 전환 범위에서 제외한다.
@@ -112,6 +137,7 @@
 - 전체 메모리 사용량이 70% 이상이거나 예상 작업 메모리를 더했을 때 70%를 넘으면 큰 작업을 즉시 실행하지 않고 리소스 큐에 넣는다.
 - 큐에 쌓인 작업은 FIFO 순서로 처리하고, 실행해도 70%를 넘지 않을 때만 시작한다.
 - 같은 작업이 반복 입력되면 `cwd + category + command` 기준으로 동일 여부를 판단하고, 이미 대기 중이거나 실행 중인 작업은 새로 쌓지 않고 스킵한다.
+- 프로젝트 작업은 프로젝트별 lane에서 병렬 진행하되, Android 기기/에뮬레이터, Docker, Supabase 로컬 컨테이너, 동일 포트 dev server 같은 공용 자원은 별도 FIFO resource lock을 우선한다.
 - 현재 상태는 `wiki resource` 또는 `wiki queue`로 확인한다.
 - 메모리가 70%를 넘으면 큰 프로세스부터 종료하지 않는다. 먼저 Phone Link, Steam WebHelper, Discord, Teams, Epic, qBittorrent처럼 코딩 작업과 무관한 백그라운드 앱과 오래된 잔여 서버/데몬을 정리한다.
 - 그래도 70%를 넘으면 큰 프로세스는 자동 종료하지 않고 후보로만 보고한다. 현재 작업 중인 Codex 세션, 빌드, 테스트, dev server, 브라우저 작업은 사용자가 명시하지 않는 한 종료하지 않는다.
@@ -119,9 +145,18 @@
 - Windows에서는 iOS/Xcode 전용 MCP나 도구를 자동 실행하지 않는다.
 - `xcodebuildmcp`처럼 현재 플랫폼과 작업에 불필요한 보조 프로세스가 떠 있으면 확인 후 정리한다.
 - Java/Gradle/Kotlin 데몬은 빌드 중인지 확인하고, 빌드가 끝난 뒤 남은 재시작 가능한 데몬만 정리한다.
+- Android 빌드(`flutter build apk/appbundle`)는 직접 호출하지 말고 항상 `E:\AI_WIKI\scripts\flutter-build-guarded.ps1`를 경유한다. 모든 FluxStudio 프로젝트가 `GRADLE_USER_HOME=E:\.gradle`를 공유해 Gradle 데몬 레지스트리가 하나이므로, 동시 빌드 시 서로의 데몬에 stop 명령이 닿아 "Gradle build daemon has been stopped"로 빌드가 깨진다. 이 래퍼가 FluxOS 공유 자원 락 `android-build`를 claim해 한 번에 하나의 빌드만 돌리고, 점유 중이면 FIFO 큐로 대기 후 자동 승격되면 빌드하며, 종료 시 항상 release한다. 호출 예: `powershell -File E:\AI_WIKI\scripts\flutter-build-guarded.ps1 -ProjectPath <flutter_app 경로> -Project <프로젝트> -Owner <세션> -BuildArgs "apk --release"`.
 - 활성 Flutter/Node/Vercel/Supabase dev server, test, build는 사용자의 다른 세션 작업일 수 있으므로 무작정 종료하지 않는다.
 - 오래 멈춘 진단 명령, 중복 status/diff, 종료된 작업의 잔여 프로세스는 정리 대상이다.
 - 자동 종료는 안전 목록에 한정한다. Codex 본체, 현재 작업 중인 Codex 세션, 활성 dev server, 활성 빌드/테스트, 브라우저, 보안/은행/드라이버 앱은 자동 종료하지 않는다.
+- `taskkill /f /im node.exe /t`, `taskkill /f /im postgres.exe /t`처럼 이름 기준으로 Node/PostgreSQL 전체를 강제 종료하지 않는다.
+- Node/PostgreSQL 정리는 작업 소유권과 종료 조건이 확인된 경우에만 한다. FluxOS/AI_WIKI가 실행한 작업은 작업 종료 시 해당 작업의 자식 프로세스만 정리하고, 전역 감시는 부모 프로세스가 사라졌고 TCP 리스닝 포트가 없으며 보호 대상 명령이 아닌 오래된 orphan 런타임만 자동 종료한다.
+- 포트를 열고 있는 dev server, Supabase/PostgreSQL, Vercel/Next/Vite 서버는 다른 세션이 사용 중일 수 있으므로 자동 종료하지 않고 모니터/후보 보고로 남긴다.
+- 작업이 끝난 Node는 퇴근시키는 것이 기본이다. guarded launcher로 시작한 작업은 종료 시 자식 `node.exe`/`postgres.exe`를 정리하고, 직접 실행된 Node는 부모 없음, 리스닝 포트 없음, 낮은 CPU 활동, 보호 명령 아님, 최소 age 초과 조건을 모두 만족할 때만 자동 종료한다.
+- WSL2/Docker는 `%USERPROFILE%\.wslconfig`에서 `memory=8GB` 상한을 기본으로 둔다. 기존 `kernelCommandLine` 등 사용자 설정은 보존하고, 적용은 Docker/WSL 재시작 후 이루어진다.
+- VS Code/Cursor는 `node_modules`, `.git`, `build`, `dist`, `.next`, `.dart_tool`, `.gradle`, `.gradle-local`, `coverage`, `.cache`를 watcher/search 제외 대상으로 둔다.
+- 퇴근/리셋은 `python E:\FluxStudio\.fluxos\run.py resource reset --mode safe`를 우선한다. 이 명령은 완료 작업 자식 프로세스, 확실한 orphan, idle daemon, 안전 캐시만 정리하고, active dev server/build/test는 보호한다.
+- 핸들, 스레드, 디스크 I/O, 캐시 후보, orphan 런타임은 FluxOS Monitor의 리소스 상태에서 확인한다.
 
 ## 장시간 명령 운영
 - 장시간 명령은 가능하면 타임아웃, 로그 파일, 진행 확인 방법을 붙여 실행한다.
