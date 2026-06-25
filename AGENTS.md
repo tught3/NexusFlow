@@ -35,7 +35,8 @@
 - 기본 응답 언어는 한국어다.
 - 여기에 남길 규칙은 둘 이상의 프로젝트군에서 재사용되는 것만 둔다.
 - 하나의 프로젝트나 도메인에만 해당하는 규칙은 여기로 올리지 말고 해당 문서로 내린다.
-- 세션 시작 시 `.planning/STATE.md`, `.planning/context/ACTIVE_SUMMARY.md`, `node scripts/gsd-context-hygiene.mjs`를 확인한다.
+- 세션 시작 시 `.planning/STATE.md`, `.planning/context/ACTIVE_SUMMARY.md`를 확인한다. `.planning/STATE.md`는 FluxOS의 `python E:\FluxStudio\.fluxos\scripts\gen_state.py`가 생성하므로, 최신화가 필요하면 이 스크립트를 다시 돌린다(과거의 `node scripts/gsd-context-hygiene.mjs`는 존재하지 않으니 호출하지 않는다).
+- 컨텍스트 hygiene 점검은 별도 노드 스크립트가 아니라 FluxOS가 `utils/hygiene.py`로 자체 수행하므로, 위키나 세션에서 임의의 hygiene 스크립트를 직접 만들어 부르지 않는다.
 - 모든 작업을 진행하기 이전에 이전 대화 기록과 현재 작업 맥락을 먼저 컨텍스트 압축한 뒤 진행한다.
 - 한글 중심 작업 환경이므로 모든 파일 읽기/쓰기는 UTF-8을 기준으로 처리하고, 한글이 깨지지 않게 확인한다.
 - PowerShell에서 한글 파일을 읽거나 쓸 때는 `Get-Content -Encoding UTF8`, `Set-Content -Encoding UTF8`, `[System.IO.File]::ReadAllText(..., [System.Text.Encoding]::UTF8)`, `[System.IO.File]::WriteAllText(..., [System.Text.Encoding]::UTF8)`처럼 인코딩을 명시한다.
@@ -187,6 +188,7 @@
 - 작업 전: 컨텍스트 압축 -> 계획 제시 -> 승인 대기
 - 작업 중: 계획 외 변경 발생 시 즉시 보고
 - 작업 후: push -> 빌드 -> 실행 -> 테스트 순서로 검증
+- **코드를 수정하면(버그수정·기능·리팩토링 무관) 완료 보고 전에 반드시 재발 방지책(회귀 테스트·가드 등)을 만든다 — 기록보다 재발 방지가 목적.** FluxStudio 계열에서는 `python E:\FluxStudio\.fluxos\run.py prevent capture --title "<제목>" --root-cause "<근본원인>" [--files <변경파일들>] [--commit <해시>] [--ai claude|codex|glm] [--project <프로젝트>]`로 근본원인을 남기면, 도구가 유형에 맞는 강제 계층(코드=회귀테스트 자동 스캐폴드 / 행동·교차AI=AI_WIKI 공통규칙 / 메타패턴=메모리)에 예방책을 배치한다. 이는 모든 AI(Claude·Codex·GLM)·모든 프로젝트의 완료 기준이며, FluxOS는 `FLUXOS_PREVENTION_GATE=block`에서 **방지책 없는 완료를 차단**한다(방지책 캡처 시 해제).
 - 모르면 가정하지 말고 질문
 - 난이도와 모델이 맞지 않으면 모델 변경 후 진행
 
@@ -217,6 +219,10 @@
 
 ## 프로젝트별 anti-patterns
 -> 각 02_PROJECTS/[프로젝트].md 파일의 금지 패턴 섹션 참조
+
+### [PREVENT] 안전 게이트는 차단입력을 실입력으로 통과하는 테스트 1개 필수 (2026-06-25)
+안전 게이트(진행·커밋·차단을 막는 판정)를 추가하거나 수정할 때, 그 게이트의 차단 입력을 만드는 producer(파서·git status·pid 생존·로그 파싱 등)를 mock한 테스트만 두지 말 것. 최소 하나의 테스트는 그 producer를 mock하지 말고 실제 입력(임시 git repo·실제 문자열·실제 파일 상태)으로 게이트를 통과시켜야 한다. 안 그러면 producer가 깨져 게이트가 死문서가 돼도 테스트가 green으로 통과한다(mocked-contract-hides-bug). 실증 사례: git status 파서가 worktree 변경 경로 첫 글자를 잘라 부분커밋 정합 게이트가 死문서였는데 모든 테스트가 그 파서를 mock해 잡지 못함.
+
 
 # NexusFlow
 
