@@ -1,4 +1,3 @@
-class NexusflowFab {
 // NexusFlow 글로벌 FAB - 모든 화면에서 음성입력/AI검색 접근
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -85,8 +84,11 @@ class _NexusflowFabState extends ConsumerState<NexusflowFab>
               heroTag: 'fab_ai',
               backgroundColor: const Color(0xFF06B6D4),
               onPressed: _onAiSearch,
-              child: const Icon(Icons.auto_awesome,
-                  color: Colors.white, size: 20),
+              child: const Icon(
+                Icons.auto_awesome,
+                color: Colors.white,
+                size: 20,
+              ),
             ),
           ),
         ),
@@ -104,5 +106,4 @@ class _NexusflowFabState extends ConsumerState<NexusflowFab>
       ],
     );
   }
-}
 }
