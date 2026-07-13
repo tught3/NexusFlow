@@ -50,10 +50,22 @@
 ### 개발 지시 → 실행자 자동 선택 (Codex 위임 포함)
 - 개발·수정·리팩토링 작업은 기존 FluxOS 파이프라인과 모델 라우터를 사용한다(메인 세션이 직접 구현하지 말고 등록·계획 후 진행).
 - 계획 뒤 구현 실행자는 라우터가 자동 선택한다. 사용자가 명시적으로 Codex 위임을 요청한 경우에만 그 작업의 task metadata(`execution_policy=claude_plan_codex_implement`)로 해당 작업만 Codex 경로로 보낸다(전역 설정·기존 정책 변경 없음, 미지정 작업은 기존 중앙정책을 따른다).
-- Claude Desktop 세션에서 시작한 저장소 변경 개발 지시는 중앙 라우팅 정책이 정한 전환일 이전 동안 자동으로 [계획→난이도별 Codex 구현→독립 1차검토→Claude 최종 process QA] 기본 파이프라인을 탄다(사용자가 "Codex로 진행" 등을 매번 말하지 않아도 됨). Claude Code CLI·데몬·CI·서브에이전트·직접 API에는 적용하지 않는다.
+- **[명령] 이 세션이 Claude Code Desktop(`CLAUDE_CODE_ENTRYPOINT=claude-desktop`)이고 사용자 지시가 저장소 변경 개발 작업(버그 수정·기능 추가·리팩토링 등)이면, 직접 Edit/Write로 구현하지 말고 반드시 아래 staged 시퀀스를 한 응답(턴) 안에서 순서대로 실행하며 각 단계 전환 시 짧은 한국어 `[작업 진행]` 메시지를 사용자에게 직접 출력한다(가시 진행 알림).** 채팅 메시지는 이 task를 자동 생성하지 않으므로(자동 트리거 배선 없음) 어시스턴트가 직접 실행해야만 파이프라인이 발화한다. hook은 채팅 가시 출력을 강제하지 못하므로 이 진행 메시지는 어시스턴트가 본문에 직접 렌더해야 한다.
+  1. `python E:\FluxStudio\.fluxos\run.py pipeline "<사용자 지시>" --project <감지한 프로젝트> --source claude-desktop --execution-policy codex --gate-session <이 세션 id> --no-wait` 실행 → 출력의 `TASK_ID:` 줄에서 task_id를 얻는다(계획 동기 수행 + Codex 실제 dispatch 후 즉시 반환).
+  2. 그 직후 **[작업 진행] msg1**(계획 완료·Codex 전달·구현 모델·구현 중)을 출력한다.
+  3. `run.py progress-wait --task <id> --until done` 실행(구현 done 회수까지 블록) → 반환 텍스트를 **msg2**로 출력(구현 결과 수신·1차검토 진행 중). 차단/실패면 그 메시지가 원인·사용자 확인 대기로 오니 그대로 출력하고 중단.
+  4. `run.py progress-wait --task <id> --until review1` → **msg3** 출력(1차검토 통과·최종 QA 중, 또는 수정 필요 알림). REVIEW_ERROR는 통과로 표기하지 않는다.
+  5. `run.py progress-wait --task <id> --until terminal` → 완료까지 블록.
+  6. 마지막에 실행 요약 카드가 담긴 최종 report(`run.py report-last` 또는 progress-wait terminal 완료 후)를 응답 맨 위에 싣고 상세는 아래 둔다.
+  - 진행 메시지 값은 모두 progress-wait 실측 출력에서 오며 추측하지 않는다. 같은 단계 메시지를 두 번 출력하지 않는다(각 `--until` 경계는 서로 다른 단계). 긴 작업으로 progress-wait가 타임아웃하면(아직 진행 중) 같은 `--until`로 다시 호출해 terminal까지 이어간다. Desktop 세션이 파이프라인 등록 없이 프로젝트 소스를 직접 편집하려 하면 PreToolUse 게이트(`desktop_pipeline_gate`)가 차단하고 이 시퀀스를 안내한다.
+- 질문·설명·읽기전용 조사·계획만 요청·"직접 구현/조사만"(사용자 override)은 저장소 변경이 아니므로 위 명령 대상이 아니며, 어시스턴트가 직접 답한다. Claude Code CLI·데몬·CI·서브에이전트·직접 API 출처에는 이 Desktop 자동 파이프라인을 적용하지 않는다. 전환일·구현 모델·fallback 순서 등 가변 정책은 이 문서에 하드코딩하지 않고 중앙 코드(`config.py`·`ai_schedule.py`)가 정한다.
 - 계획 단계에서 그 지시가 실제 저장소 변경이 필요한지 구조화 값(`requires_repository_changes`/`task_intent`)으로 판정해 남긴다. 질문·설명·읽기전용 조사·계획만 요청이면 변경 불필요로, "직접 구현/조사만"은 사용자 override로 처리하며, 판정이 없거나 모호하면 자동 Codex를 적용하지 않고 기존 중앙정책을 따른다(fail-closed).
 - 구현자와 검토자는 분리한다(구현자와 다른 세션의 독립 1차검토 + 별도 2차검토). 구현 세션의 자기승인(done 내 자기평가)을 정식 검토로 인정하지 않는다.
 - Claude 최종 단계는 중복 코드리뷰가 아니라 과정 감사(process QA)다: 계획이 요구를 반영했는지, 독립 1차검토가 실제로 검증했는지, PASS가 증거로 정당한지, 테스트가 사용자 요구를 증명하는지를 확인하고, 근거 없는 통과는 되돌린다.
+- Claude Desktop 개발작업 완료 시, FluxOS가 실제 실행 기록(구현 모델·독립 1차검토 모델·최종 QA 결과·테스트·최종 상태)에서 생성한 실행 요약 카드가 최종 보고 맨 위에 온다. 이 카드를 최종 응답 상단에 그대로 싣고 상세 보고는 그 아래 유지한다. 카드 값은 기억·추측이 아니라 실제 아티팩트에서 오며, 실행되지 않은 단계나 확인되지 않은 토큰·비용은 추측하지 않는다(미기록/미포집으로 둔다).
+- 새 Claude Desktop 세션에서는 첫 사용자 응답 맨 위에, 현재 FluxOS 파이프라인·정책 상태를 요약한 세션 배너를 한 번만 표시한다(세션당 1회). 세션 생성 직후 무입력 자동 출력은 Desktop 제약상 불가하여 UserPromptSubmit hook가 배너를 주입하고 모델이 첫 응답에 렌더하는 방식이다. 배너는 관찰·안내 전용이며 실행 정책을 바꾸지 않는다. 검증된 Desktop origin·등록 프로젝트에서만 표시하고 다른 출처(Claude Code/CLI/데몬/CI/API)에는 표시하지 않으며, 중앙 FluxOS를 못 찾으면 성공 배너 대신 경고를 낸다. 배너 값은 실제 런타임 상태에서 읽고 날짜·모델 라우팅을 문서에 하드코딩하지 않는다.
+- Claude Desktop 개발 작업 진행 중에는 주요 단계 전환(계획 확정·구현 완료/실패·1차검토·수정/모델 승격·최종 QA·승인 대기/차단)에서만 한국어 `[작업 진행 상황]`을 표시한다(현재 단계·현재 단계의 실제 모델·완료 단계의 실제 소요시간). 저수준 로그나 명령 한 줄마다 표시하지 않는다. 값은 실제 단계 이벤트(`run.py progress --task <id>`)에서만 읽고 단계·모델·시간을 추측하지 않으며, 계산 불가한 시간은 미기록으로 둔다. 실시간 메시지 수정은 Desktop 제약상 불가하므로 기존 메시지를 덮어쓰지 말고 전환 시 스냅샷을 새로 보여준다. 최종 완료 카드에는 단계별 소요시간을 포함한다. 질문·조사에는 진행 표시를 하지 않는다.
+- 검증된 Claude Desktop 세션에서는 세션 배너와 별개로, **모든 사용자 응답 맨 위에** 한국어 `[요청 처리 상태]`를 한 번 표시한다(매 응답, 4줄 안팎 간결). 방금 요청의 출처·요청 유형(개발/질문/조사)·저장소 변경 필요·적용 정책·현재 단계를 실제 데이터에서만 채운다(추측 금지). 개발작업으로 파이프라인에 등록하면 `run.py request-status --task <id>`의 실측 출력을 쓰고, 직접 답하면 "Claude 직접 응답 / Codex 실행: 없음"으로, 계획 확정 전에는 "판정 대기 / 계획 분석 중"으로 표기하며 확정 전 Codex 적용으로 표기하지 않는다. 개발 완료 시 이 상태 아래에 기존 Phase 4 실행 요약 카드를 결합한다. 사용자 노출 문구(상태·단계·판정·사유)는 전부 한국어로 렌더한다(내부 코드/JSON 키는 영어 유지). 다른 출처에는 이 상태를 적용하지 않는다.
 - 실제 검증(테스트·독립 1차검토·2차검토)을 통과하기 전에는 사용자에게 완료보고를 하지 않는다.
 - 날짜·가격·구체 모델명·fallback 순서 같은 가변 정책은 이 문서에 하드코딩하지 않고 중앙 코드/설정(`config.py`·`ai_schedule.py`·`plans.json`)에 둔다.
 
@@ -210,8 +222,10 @@ tags: [layer/truth, type/gov, ai/all]
 
 ## 장시간 명령 운영
 - 장시간 명령은 가능하면 타임아웃, 로그 파일, 진행 확인 방법을 붙여 실행한다.
-- 30초 이상 변화가 없으면 프로세스 CPU/RAM, 하위 프로세스, 로그 tail, 네트워크 대기 여부를 확인한다.
-- 같은 명령을 무작정 반복하지 않는다. 범위를 줄이거나 다른 검증 경로로 우회한다.
+- 30초 이상 변화가 없으면 대기·반복 확인을 기본값으로 삼지 않는다. 먼저 프로세스 CPU/RAM·하위 프로세스·로그·네트워크·입력 대기·락을 확인해 정지 지점을 분류하고 근거를 남긴다.
+- 분류 뒤에는 해당 원인에 맞는 가장 좁고 안전한 복구를 자동 적용한다(타임아웃/명령 경로 조정, 범위 축소, 정상 대체 경로 사용, 자신이 만든 잔여 프로세스 정리, 확인된 안전 락 해제 등). 복구 결과를 검증한 뒤 원래 작업을 즉시 재개한다.
+- 같은 명령을 무작정 반복하거나 원인 미확정 상태에서 주기 감시만 하지 않는다. 주기 감시는 원인이 확인된 외부 의존성·공유 자원 대기 또는 복구 효과 검증에만 쓴다.
+- 다른 세션 소유 가능성이 있는 프로세스·락·배포·데이터는 소유권을 확인하기 전 자동 종료·해제·변경하지 않는다. 파괴적·되돌릴 수 없는·외부 영향이 있는 복구만 사용자 확인 후 진행한다.
 - 병렬 실행은 파일/모듈/저장소가 겹치지 않을 때만 사용하고, 완료된 하위 작업은 즉시 닫는다.
 
 ## 완료 기준
@@ -253,6 +267,7 @@ tags: [layer/truth, type/gov, ai/all]
   - **애매하면 질문 쪽으로 기운다**(fail-safe — exhausted 모드의 fail-closed 철학과 동일한 임계값 철학 재사용, 새로 발명하지 않음).
 - 난이도와 모델이 맞지 않으면 모델 변경 후 진행
 - **작업이 끝나면 완료 보고 전에 스스로 Review를 수행한다**: 이번 작업에서 배운 것, 재발 방지 후보, 자동화 후보, 기존 규칙과의 충돌 여부를 스스로 점검한 뒤 보고한다(구 Obsidian Vault 흡수, 2026-07-03).
+- **작업 예상시간 선언 + 2배 초과 시 실측 재점검 + 뻔한 블로커 자동해결(2026-07-13, CEO 강한 반복 지시, E:\FluxStudio 전역·전 AI·모든 경로 공통)**: (1) 모든 작업, 특히 백그라운드 작업(테스트·빌드·커밋·긴 명령)을 시작할 때 원래 걸리는 **예상시간을 근거와 함께 전달**한다(예: FluxOS pre-commit 훅 커밋 ~2-3분, 전체 테스트 ~X분). (2) 예상시간의 **2배를 넘기면 무작정 더 기다리지 말고 실측으로 현재 상태를 재점검**한다 — 진행 중인가/멈췄나/오류·실패했나/락 존재/staged 여부/프로세스 생존/로그 tail을 확인하고, 지금까지 걸린 시간 대비 결과물이 맞는지 판단한 뒤 **근본원인을 찾아 해결**한다(같은 방식으로 재대기 금지). (3) 원인이 뻔하고 되돌리기 쉬운 블로커는 **사용자 지시 없이 스스로 해결**한다: 신규 파일이면 커밋 전 자동 `git add`(pathspec 매칭 실패 예방), stale `index.lock`(죽은 프로세스 것)은 제거 후 재시도(원자 시퀀스 `rm -f lock; git commit` + 락 경합 시 자동 재시도 루프), 포트충돌·미스테이징 등도 즉시 처리. (4) **리소스 최소**: 이 재점검·재시도 로직은 무겁지 않게 — 짧은 상태확인(로그 tail·상태파일 읽기) 위주, 무거운 전체 스캔·sleep 폴링 루프 금지, 완료 알림/이벤트 우선, 폴링 불가피하면 긴 간격. (기존 "AI가 직접 할 수 있는 건 바로 실행"·"장시간 작업 스스로 확인" 원칙의 강화·구체화.)
 
 ## 응답 원칙
 - 한국어로 응답
@@ -476,6 +491,30 @@ GATEWAY_ENFORCED_COMMANDS(gh/supabase raw 차단)는 api_runner.py run_safe_comm
 
 ### [PREVENT] adb monkey 실행이 시스템 자동회전을 전역 해제(thawRotation) (2026-07-12)
 adb shell monkey는 실행 시 WindowManager thawRotation을 호출해 accelerometer_rotation=1을 시스템 권한(package:android)으로 강제 기록, 사용자의 세로고정이 풀린다. S23/태블릿 실측 재현(am start=유지, monkey=즉시풀림), 앱 무관(삼성인터넷도 동일 재현). 설치 후 앱 실행은 반드시 am start(-W -n pkg/activity, 실패시 cmd package resolve-activity --brief로 동적 확인 후 재시도)를 사용하고 monkey는 금지. 2026-07-03 기존 방지책의 configChanges orientation 원인 지목은 오진이었음
+
+### [PREVENT] NexusFlow 세션: prevention hook이 타 세션 사전 dirty 파일을 내 변경으로 오인 (2026-07-12)
+prevention_stop_hook.py가 세션 diff가 아니라 현재 git status 전체를 스캔해, 세션 시작 전부터 이미 dirty였던 다른 세션의 미커밋 변경(lib/screens/* 등 18개 파일)까지 내가 만든 변경으로 잘못 판단함. 이번 세션은 nexusflow_pipeline.dart 1줄 import 제거만 시도했으나 ownership gate에 막혀 실제 반영은 0건(git diff 빈 결과로 확인).
+
+### [PREVENT] MarketingFlow Publishing Layer fail-closed 게이트 (2026-07-12)
+SNS 반복게시 계층 신설 시 미승인/PII/미검수자산/토큰없음 콘텐츠가 실게시로 새어나갈 위험. 다층 fail-closed(승인+approve+confirm-network 3중 잠금, PII/placeholder 스캔, 자산존재검증, 중복ledger)로 차단하고 회귀테스트 16건으로 고정.
+
+### [PREVENT] CEO OS 정체 복구와 폴링 계약 (2026-07-12)
+자동 재시작 제외 플래그와 행 세션 구형 락이 복구 판정을 막고, 중복 폴링과 정체 카드 액션이 실제 서버 상태 계약과 분리되어 있었다. 회귀 테스트로 복구·락 회수·UI 액션 계약을 고정했다.
+
+### [PREVENT] 무인 정리 자동화 안전 게이트 (2026-07-12)
+전 레포 tick과 FluxOS ownership 매핑을 fail-closed로 연결하고 회귀 테스트로 고정했다
+
+### [PREVENT] publish.mjs 상태판정이 이번실행분 아닌 전체 publish_results 누적이력으로 FAILED 오판 (2026-07-12)
+실제 YouTube 비공개 테스트 업로드가 성공(status=ok, video_id 발급, API 재조회로 private 확인)했음에도 packet_state가 FAILED로 표시됨. 원인은 상태마감 로직이 packet.publish_results.filter(mode==live) 전체(과거 blocked 시도 4,5번 포함)를 판정 대상으로 삼아 allOk가 false가 된 것 — 정상 성공(6번)이 과거 실패 이력에 가려짐. 첫 실행이 아니면(재시도·재승인 흐름에서) 항상 재발 가능한 구조적 결함. 수정: 루프 시작 전 publish_results.length를 저장해 이번 실행분만 slice해서 판정. 회귀: 같은 패킷 재실행(ledger skip) 시 PUBLISHED로 정상 판정되는지 실측 검증.
+
+### [PREVENT] Meta(Instagram/Threads) 토큰 갱신은 Google과 다른 모델 — refresh_token 없이 장기토큰 자체를 refresh (2026-07-12)
+Google OAuth는 access_token(단기)+refresh_token(장기, 별도 값)을 발급해 refresh_token으로 새 access_token을 계속 재발급받는 구조. Meta(Instagram Business Login/Threads)는 이 구조가 아니라 short-lived token을 GET 요청으로 long-lived token(~60일)으로 1회 교환한 뒤, 만료 전(발급 24h 경과 시점부터) 그 long-lived token 자체를 refresh 엔드포인트에 넘겨 새 long-lived token으로 갱신하는 방식이다(refresh_token이라는 별도 값이 없음). google-oauth.mjs 패턴을 그대로 복붙하면 존재하지 않는 refresh_token 필드를 찾다가 항상 NEEDS_REAUTH로 빠지는 버그가 생긴다. meta-oauth.mjs를 Google과 별도 모듈로 분리하고 REFRESH_WINDOW_MS(만료 7일전)로 자체 판정하도록 구현, 테스트 5건(만료前재사용/만료임박자동갱신/이미만료NEEDS_REAUTH/파일없음/refresh API실패)으로 고정.
+
+### [PREVENT] Meta Instagram Business Login http 127.0.0.1 루프백 거부 (2026-07-12)
+Google/YouTube OAuth 데스크톱 클라이언트는 http 127.0.0.1 루프백 허용하나 Meta Instagram Business Login 콘솔 실측 결과 http/localhost 둘다 거부, https 127.0.0.1만 허용. meta-oauth-connect.mjs가 google-oauth 패턴 따라 http 서버였음. 대응: local-https.mjs 신규, openssl로 self-signed 인증서 생성 캐싱, node:https 전환. 실제 HTTPS 리스닝응답 실측검증.
+
+### [PREVENT] FinFlow resolved activity launch fallback (2026-07-13)
+Hard-coded MainActivity launch can fail when the installed package exposes a different launcher activity; monkey fallback has unsafe device-wide side effects.
 
 
 # NexusFlow
