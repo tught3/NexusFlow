@@ -7,8 +7,157 @@
 
 ## 사용자 확정 선호
 <!-- 04_Memory/Preference status:confirmed 항목 자동 반영. 원본 수정은 04_Memory/Preference/*.md에서, 승인/반려는 run.py memory confirm/reject로. -->
+- **FluxOS 파이프라인 자동화(Task-A/B/C) 완료 후 **Phase 2 자동화 백로그 7개**를 반드시 진행한다. CEO가 2026-07-19 세션에서 말한 요구사항 전체. 이 preference는 파이프라인 구축 직후 자동으로 다음 작업 목록으로 다시 꺼내기 위한 영구 저장소다.**
+  - Why(2026-07-19 CEO 결정): 파이프라인 1차 자동화(GLM→Flash+M3→M3 thinking→GLM 회신)가 끝나도 CEO가 겪은 실제 문제(dirty/워크트리 100개+/좀비 세션/블로킹 무한 대기 등)는 해결 안 됨. 이걸 잊지 않고 Phase 2로 이어서 진행해야 한다. 세션 기록은 휘발성이라 preference로 저장해서 다음 세션에서도 자동 로드되게 한다.
+
+## Phase 2 백로그 (파이프라인 완료 후 진행)
+
+1. **워크트리 자동 정리** — dirty/미커밋/워크트리 100개+ 문제. `worktree_autoclean.py` advisory → apply 모드 전환, 정리 기준 강화. 파이프라인 구축 중 발견된 untracked 파일 패턴(_pf_*.txt, 다른 세션 attribution 테스트 파일, MarketingFlow 잠식 등) 전부 반영.
+
+2. **블로킹 자동 해소** — 앞 작업이 다른 세션에서 사용 중일 때:
+   - 소유자 파악 → 정상 작업인지 확인 요청
+   - 정상이면 완료 신호 대기 + 큐 대기
+   - 비정상(좀비/고아/응답없음)이면 원인 진단 후 자동 처리 또는 보고
+   - 현재 `ownership_blocks_live()`는 detection만 하고 action을 안 함 → action 레이어 추가
+
+3. **1N/2N 예상시간 강제 점검** — AGENTS.md 규칙은 있으나 데몬(pipeline-daemon/scheduler-daemon)에 기계 장치로 배선 안 됨. Monitor 도구에 timeout_ms + 진행 이벤트 배선.
+
+4. **동시 다발 작업 파일 잠금 조율** — 여러 프로젝트 동시 진행 시 파일 비중첩 검증 강화. 현재는 pathspec 커밋 원칙에 의존. 자동 검증 레이어 추가.
+
+5. **좀비/고아 세션 자동 처리** — 부모 프로세스 죽은 자식 세션 스캔, 정리. 2026-07-17에 데몬 3종 복제 사고 전례.
+
+6. **취소/중단 task 자동 회복** — 7/17 cancel 5건 같은 케이스. lifecycle identity missing 같은 정당한 이유로 cancel된 task 감지 → 자동 replay 또는 CEO 승인 후 replay.
+
+7. **리뷰어-구현자 간 모순 지시 방지** — 3회 연속 REWORK 같은 패턴. 2회 이상 REWORK 시 자동으로 GLM 개입, 계획서 정정 또는 모델 교체 검토.
+
+## How to apply
+
+파이프라인 1차 자동화(Task-A/B/C 전부 완료 + GLM 보고 자동화 검증) 끝나면, **GLM이 자동으로 이 preference를 읽고 Phase 2 계획서 작성을 CEO에게 제안**한다. CEO가 승인하면 각 항목을 Flash/M3 분배 계획서로 만들어 진행. 백로그 항목 사이에 우선순위 변경 가능(CEO 결정).
+- **GLM이 CEO에게 전달하는 메시지에서 **CEO가 직접 해야 하는 액션(다른 세션에 복붙, 승인, 결정 등)은 색깔 이모지 + 굵은 글씨 + 구분선으로 눈에 확 띄게 표시**한다. 일반 정보/분석과 액션 아이템이 시각적으로 섞이지 않게 한다.**
+  - Why(2026-07-19 CEO 결정): GLM의 응답이 길어지면 "내가 지금 뭘 해야 하는지"를 한눈에 식별하기 어렵다. 프롬프트를 드렸다고 생각했는데 CEO가 못 알아보면 흐름이 끊기고 반복 질문이 발생한다. 액션 아이템을 시각적으로 분리하면 CEO가 즉시 복붙 또는 결정을 내릴 수 있다.
+
+How to apply: CEO 액션이 필요한 섹션은 아래 형식을 따른다:
+1. **구분선** (`---`)으로 앞뒤 내용과 분리
+2. **큰 헤딩** + 🔴/🟡/🟢 색깔 이모지로 중요도 표시 (🔴=즉시 필요, 🟡=결정 대기, 🟢=참고용)
+3. **굵은 글씨**로 "CEO 액션" 명시
+4. 복붙 대상(Flash/M3 세션 등)을 첫 줄에 명시
+5. 긴 컨텍스트(분석, 진단 등)는 액션 아이템 뒤에 두거나 아예 별도 메시지로 분리
+
+예시:
+```
+---
+
+## 🔴 **[CEO 액션] Flash 세션에 복붙**
+
+아래 블록을 Flash 세션에 그대로 붙여넣으세요:
+\`\`\`
+[Task] ...
+\`\`\`
+
+완료 보고 오면 제가 검증하겠습니다.
+
+---
+```
+
+이 규칙은 모든 GLM 응답(CEO OS 보고, 대화형 세션 응답, 계획서 등)에 일관되게 적용한다.
+- **CEO가 세션 중 새로운 규칙·선호·정책을 말하면, **AI가 별도 지시를 기다리지 않고 그 즉시 `E:\AI_WIKI\04_Memory\Preference\`에 preference 파일로 저장**한다. 세션이 끝나면 대화 기록은 사라지지만 preference는 영구 유지돼 다음 세션 시작 시 자동 로드된다.**
+  - Why(2026-07-19 CEO 결정): CEO가 "컴퓨터 껐다 켜도 이 규칙들을 유지하고 싶다"고 명시했다. 세션 대화 기록은 휘발성이라 그 안에서만 규칙을 기억하면 다음 세션에서 잊어버려 재지시가 반복된다. AI_WIKI preference는 비휘발성 저장소라 컴퓨터 재부팅·세션 종료와 무관하게 유지되고, AGENTS.md/CLAUDE.md 생성 시 "사용자 확정 선호" 블록에 자동 반영된다.
+
+How to apply: CEO가 "앞으로 ~하게 해", "무조건 ~해", "~이 기본이야", "앞으로도 계속 ~해줘" 같은 지속성 표현을 쓰거나, 같은 규칙을 두 번 이상 지시하면 그 자리에서 preference 파일을 만든다. 파일 형식은 기존 preference(frontmatter: id/category/scope/source/created/updated/status=confirmed/observation_count/existing_knowledge_check/tags/links + 본문 ## Statement / ## Rationale[Why+How to apply])를 따른다. 단, 되돌리기 어려운 작업(구조 변경·데이터 삭제·외부 API 실제 호출·사업적 판단)에 해당하는 규칙은 preference로 저장하기 전에 먼저 CEO에게 확인한다(기존 "제발" 예외와 동일 맥락). 저장 후 CEO에게 "preference로 등록했음"을 보고한다.
+- **GLM이 구현 task(Flash/M3)에게 전달하는 위임 프롬프트의 "완료 조건"에는 항상 **① 커밋(pathspec) ② push(origin 동기화) ③ REQUIRED_CHECKS 전부 exit 0 ④ git status 최종 clean 확인**을 명시적으로 적는다. "코드 다 짬"은 완료가 아니라 커밋+검증까지 끝나야 완료다.**
+  - Why(2026-07-19 실측 사고): GLM이 Flash에게 "Task-A"를 위임하면서 완료 조건에 "테스트 통과"만 적어두고 커밋/push/REQUIRED_CHECKS를 안 적었다. Flash는 코드를 다 짜고 테스트 통과한 뒤 "완료 보고"를 올렸지만 커밋을 안 해서 8개 파일이 전부 dirty/untracked로 남았다. GLM이 검증 단계에서야 발견해서 다시 Flash에게 커밋 지시를 내야 하는 이중 작업이 발생. "완료"의 정의가 명확하지 않으면 구현자가 어디서 멈춰야 할지 못 알아본다.
+
+How to apply: GLM이 Flash/M3에게 위임 프롬프트를 쓸 때, "완료 조건" 섹션에 아래 4가지를 빠짐없이 명시한다:
+1. **커밋**: pathspec으로 신규+수정 파일 전부 (git add -A 금지, 파일별 개별 커밋)
+2. **push**: main → origin/main 동기화
+3. **REQUIRED_CHECKS**: 각 check_id별 flux_test_recorder.py 경유 exit 0 확인
+4. **git status 최종 clean**: dirty/untracked 남은 파일 0개
+
+완료 보고 양식에도 "커밋 해시 / push 결과 / REQUIRED_CHECKS exit 0 / clean 상태" 4가지를 필수로 포함시킨다. 구현자가 "코드 다 짬"만 보고하면 GLM은 절대 완료로 인정하지 않고 커밋/검증 단계를 다시 지시한다.
+- **GLM은 **계획 수립, 구조 파악, 리팩토링 설계 등 GLM이 직접 판단해야 하는 고난도 작업에만 직접 손을 대고**, 그 외 난이도가 낮은 구현·문자열 변경·테스트 작성·반복 작업은 Flash나 M3에게 프롬프트만 전달해 위임한다. GLM이 직접 코드를 수정하는 건 예외적으로만.**
+  - Why(2026-07-19 CEO 결정): GLM은 routing_engine 사다리에서 계획·보고 역할을 맡고 있고, 구현·검토는 Flash·M3가 담당하도록 역할 분담을 확정했다(pipeline_workflow_glm_plan_flash_m3_impl_m3_review 참조). 그런데 GLM이 직접 코드까지 수정하면 역할 분담의 의미가 사라지고, GLM 비용이 낭비되며, 검토 독립성이 깨진다. GLM은 오케스트레이터(계획·분배·검토·보고) 역할에 집중하고 실제 구현은 경량 모델에게 맡기는 게 비용·시간·독립성 모두 유리하다.
+
+How to apply: 작업을 시작하기 전 "이게 GLM 직접 판단이 필요한가?" 자문한다. 직접 판단이 필요한 경우: ①계획서 작성 ②코드베이스 구조 파악·아키텍처 진단 ③리팩토링 설계 ④원인 진단(복잡한 디버깅) ⑤의사결정이 필요한 분기점. 이 경우 직접 진행. 그 외(단순 문자열 변경, 단일 파일 수정, 테스트 스캐폴드, 문서 업데이트, 반복 명령 실행)는 Flash 또는 M3용 프롬프트로 작성해 위임. 빠른 조사라도 GLM이 직접 하는 게 더 빠르면 조사는 직접 해도 됨(조사는 판단 작업에 가까우므로). 단, 조사 후 실제 코드 수정은 위임 원칙을 따른다.
+- ****GLMS 모드가 기본 활성화.** CEO가 매번 "GLMS로 돌려"라고 말하지 않아도, 모든 비단순 작업(개발·수정·리팩토링·분석·리뷰)은 자동으로 GLMS 사이클(GLM 계획 → Flash+M3 구현 → M3 thinking 1차 검토 → 필요 시 GLM 5.2 검토자 인계 → GLM 최종 보고)로 진행한다. 컴퓨터를 껐다 켜도, 새 세션을 열어도 이 설정은 유지된다.**
+  - Why(2026-07-19 CEO 결정): CEO가 매번 "GLMS로 돌려"라고 붙이는 건 번거롭다. 한 번 GLMS 모드로 진입하면 이후 모든 작업이 GLMS로 진행되게 하고, 컴퓨터를 껐다 켜도 그 상태가 유지되기를 원한다. preference는 AI_WIKI에 영구 저장되어 매 세션 시작 시 자동 로드되므로, 이 설정을 preference로 두면 CEO가 새 세션을 열거나 컴퓨터를 재부팅해도 GLMS 모드가 자동으로 적용된다.
+
+## How to apply
+
+**활성화**: 이 preference가 존재하는 동안 GLM은 모든 비단순 작업을 다음과 같이 처리한다:
+1. CEO의 자연어 지시를 받으면 GLM이 직접 `utils/glms_runner.py:run_glms()`를 호출
+2. 각 단계(lead/workers/qa/review2/done) 진행률을 CEO에게 보고
+3. REWORK 시 CEO 개입 가능 (중단/건너뛰기/수정 지시)
+4. PASS 시 GLM이 최종 보고서 작성하여 CEO에게 전달
+
+**예외 (GLMS 안 씀)**:
+- 단순 질문·설명·조사 (GLM이 직접 답변)
+- 읽기 전용 작업 (파일 조회, git status 등)
+- CEO가 명시적으로 "이건 GLMS 안 쓰고 그냥 해"라고 한 경우
+
+**비활성화**: CEO가 "GLMS 끄" 또는 "GLMS 모드 해제"라고 하면 이 preference를 reject/삭제하여 다시 기본 모드로 돌아간다. 재활성화는 "GLMS 켜" 한마디면 즉시 복구.
+
+**세션 무관**: 이 preference는 AI_WIKI의 `04_Memory/Preference/`에 저장되어, opencode 세션을 새로 열거나 컴퓨터를 재부팅해도 AGENTS.md/CLAUDE.md 생성 시 "사용자 확정 선호" 블록에 자동 반영된다. GLM은 매 세션 시작 시 preference를 읽고 GLMS 모드를 자동 인식한다.
+- **GLMS 사이클 진행률 보고에는 **반드시 현재 작업 중인 모델**을 명시한다. 단계가 바뀔 때마다 CEO에게 "지금 어떤 모델이 작업 중인지"가 보이게.**
+  - Why(2026-07-19 CEO 결정): GLMS는 여러 모델이 순차적으로 투입된다 (GLM-5.2 계획 → DeepSeek Flash 구현 → MiniMax M3 구현 → M3 thinking 1차 검토 → GLM-5.2 검토자 인계 → GLM-5.2 최종 보고). CEO가 진행률만 보면 지금 누가 일하고 있는지 알 수 없다. 모델이 바뀔 때마다 명시해주면 CEO가 흐름을 한눈에 파악할 수 있고, 특정 모델에서 자주 막히는지 패턴 파악도 가능하다.
+
+## How to apply
+GLMS 진행률 보고 형식 (전체 + 모델별 퍼센트 매 단계마다):
+```
+[전체 진행률] X% | 현재 모델: GLM-5.2 (역할: 계획) | 단계: lead
+  └ 모델별 상태:
+     • GLM-5.2 (계획): 100%
+     • DeepSeek-Flash (구현-단순): 대기
+     • MiniMax-M3 (구현-복잡): 대기
+     • M3-thinking (1차 검토): 대기
+
+[전체 진행률] 35% | 현재 모델: DeepSeek-Flash (역할: 구현-단순) | 단계: workers
+  └ 모델별 상태:
+     • GLM-5.2 (계획): 100% 완료
+     • DeepSeek-Flash (구현-단순): 60% (B1 완료, B2 진행 중)
+     • MiniMax-M3 (구현-복잡): 40% (C1 진행 중)
+     • M3-thinking (1차 검토): 대기
+```
+
+매 단계 전환 시마다 전체 진행률 + 현재 모델 + 모델별 상세 퍼센트를 표시. CEO가 한 화면에서 "전체 중 얼마나 왔고, 각 모델이 지금 얼마나 했고, 지금 누가 일하고 있는지"를 다 볼 수 있게.
+
+모델 전환 시점(예: M3 thinking → GLM-5.2 인계)에는 별도 전환 메시지도 함께:
+```
+[모델 전환] M3-thinking → GLM-5.2 (사유: M3 1회 REWORK 후 문제 지속)
+```
+
+이 형식은 run_glms wrapper의 progress_callback이나 write_progress 호출 시 자동 포함되도록 구현한다 (Task-E-M3의 chain_state.reviewer_model 필드와 연계).
+- **GLM이 세운 모든 구현 계획서에는 **"구현은 무조건 서브에이전트로 병렬 위임"**을 기본으로 명시한다. 단일 세션이 직렬로 파일을 수정하는 방식은 기본값에서 제외한다.**
+  - Why(2026-07-19 CEO 결정): GLM·Flash·M3 각 모델이 계획만 보고 자율 판단으로 서브에이전트를 띄우지 않는다는 걸 실측으로 확인했다(AGENTS.md "위임이 자동으로 항상 적용되지는 않는다" 정책과 일치). 그래서 계획서에 명시 안 하면 직렬 처리로 빠져 병렬 이점이 사라진다. 무조건 명시해야지만 병렬 진행이 보장된다.
+
+How to apply: 계획서의 모든 구현 task에 "서브에이전트로 병렬 위임" 문구를 명시적으로 넣는다. 단, task 자체가 파일 1개 단순 변경이라 서브에이전트 오버헤드가 더 큰 경우는 예외로 직렬을 허용하되, 계획서에 그 사유를 명시해야 한다(예: "단일 파일 문자열 1곳 변경이므로 직렬 진행"). 분배 대상은 난이도(Flash 단순 / M3 복잡) 기준을 따르고, 같은 task 안에서도 파일 비중첩이면 세부 항목을 서브에이전트로 병렬 처리한다.
+- **MiniMax M3를 구현과 검토 양쪽에 쓸 때 **thinking 모드를 역할에 따라 구분**한다:
+- **구현 M3**: thinking = `none` (빠른 실행, 저렴)
+- **검토 M3(최종 리뷰)**: thinking = `on` (깊은 추론, 빈틈 탐지)**
+  - Why(2026-07-19 CEO 결정): 검토 단계는 계획서 대비 누락·오류·회귀 가능성을 찾는 고도 판단 작업이라 깊은 사고(thinking on)가 필수다. 반면 구현 단계는 이미 GLM이 세운 계획서를 그대로 따르는 실행이라 빠르고 저렴하게 돌리는 게 효율적이다(thinking none). 같은 M3 모델이라도 역할에 따라 thinking 설정을 다르게 하면 비용·속도·정확도 균형이 최적이 된다.
+
+How to apply: GLM 계획서에서 위임 프롬프트를 작성할 때, M3 구현 task에는 `thinking=none`을 명시하고, 최종 검토(리뷰) task에는 `thinking=on`을 명시한다. Flash는 기존대로 단순 작업에 쓰고 thinking 구분 적용 대상이 아니다. 이 규칙은 CEO OS 자동 파이프라인과 대화형 세션 위임 양쪽 모두에 적용한다.
+- **모델 역할 분담은 **강제가 아니라 유연하게**. 핵심은 "해당 역할을 잘 수행할 수 있는 모델"이 그 역할을 맡는 것. 파이프라인 기본값(GLM 계획 → Flash+M3 구현 → M3 thinking 검토 → GLM 보고)은 가이드라인일 뿐이다. **M3가 감당하기 어려운 구현은 GLM이 직접 해도 되고**, 반대로 GLM 역할을 더 가벼운 모델이 잘한다면 그쪽으로 넘겨도 된다.**
+  - Why(2026-07-19 CEO 결정): 모델 역할을 경직되게 고정하면 작업이 막힐 수 있다. 중요한 건 역할을 잘 수행하는 것, 그리고 동일 역할에 2개 이상 모델이 적합하면 더 싼 모델을 우선하는 것. 이 원칙만 지키면 세부 배정은 자유롭게.
+
+How to apply: GLM이 계획서를 쓸 때 ① 각 항목의 성격(조사/단순 구현/복잡 로직/디버깅/테스트 작성)을 보고 ② 역할 수행 능력이 충분한 모델 후보를 식별한다. 후보가 2개 이상이면 비용 순으로 정렬해 가장 싼 모델을 기본으로 지정. 단, 기본값(Glm/Flash/M3/M3-thinking)을 무시해야 할 만한 사유가 있으면 계획서에 명시(예: "이 항목은 M3로는 감당 어려워 판단하는 다중 파일 아키텍처 변경 → GLM 직접 수행"). CEO가 위임을 받을 때 "이 부분은 GLM이 직접"이라고 적혀 있으면 그대로 GLM이 진행, 그렇지 않으면 기본값 모델(Flash/M3)에게 위임.
+- **FluxOS 계열 프로젝트의 비단순 개발 작업 파이프라인은 **GLM 계획 → DeepSeek Flash + MiniMax M3 구현 → M3 검토 → GLM 완료 보고** 흐름을 기본으로 한다. 단일 모델이 계획·구현·검토를 다 담당하지 않고, 역할을 4단계로 분리한다.**
+  - Why(2026-07-19 CEO 결정): CEO OS에서 지시를 내리면 파이프라인이 끝까지 간 적이 없었다. 근본 원인 3가지: ① 표시 라벨은 Claude로 고정되어 있고 실제 실행은 routing_engine이 GLM을 선택하는 모순, ② Claude 한도 소진 시 자동 폴백 루프가 blocked 상태로 영원히 막힘, ③ 같은 모델이 계획·구현·검토를 다 하니 검증 독립성이 없었다. 그래서 모델별 역할을 명확히 분리하되, GLM(계획/보고)은 routing_engine 사다리에 있고, DeepSeek Flash·MiniMax M3(구현)·M3(검토)도 routing_engine 사다리에 있어 자동 연쇄가 가능한 조합으로 확정했다. Claude는 자동 라우팅에서 제외(2026-07-16 결정 유지)하고 CEO OS 큐가 아닌 대화형 세션에서만 쓴다.
+
+How to apply: GLM 세션이 계획을 세우고(본문+REQUIRED_CHECKS+위임 컨텍스트 포함), CEO가 Flash 세션과 M3 세션을 따로 띄워 각각 구현을 맡긴다(난이도별 분배 — 별도 preference 참조). 구현이 끝나면 M3가 독립 검토(1단계, 2026-07-16 통합 정책 유지)하고, 그 결과를 GLM 세션으로 보고한다. GLM은 검토 통과 시 최종 보고서를 CEO에게 제출한다. 이 흐름은 CEO OS 자동 파이프라인과 대화형 세션 양쪽 모두에 적용한다.
+- **GLM이 세우는 구현 계획서에는 Flash와 M3가 **적당히 큰 작업 단위가 끝날 때마다 현재 대략 몇 % 완료됐는지 CEO에게 알리도록** 명시한다. 최종 완료 보고만 기다리게 하지 않고 중간 진행률을 투명하게 보고한다.**
+  - Why(2026-07-19 CEO 결정): 완료 보고만 기다리면 CEO가 진행 상황을 몰라 답답하고, 문제가 생겨도 늦게 발견한다. 특히 Flash·M3가 병렬로 돌면 어느 쪽이 빠르고 어느 쪽이 막혔는지 한눈에 안 보인다. 큰 작업 단위가 끝날 때마다 %를 받으면 CEO가 진척도를 실시간으로 파악할 수 있고, 막힌 쪽을 조기 개입할 수 있다.
+
+How to apply: 계획서의 모든 구현 task에 "큰 작업 단위(예: 파일 수정 완료, 테스트 통과, 디버깅 1단계 종료, 회귀 테스트 50% 돌파 등)가 끝날 때마다 현재 진행률(대략 몇 %)을 CEO에게 보고"라는 문구를 포함한다. 보고 형식은 간단하게 "[진행률] TASK-A: 약 60% (router.py 완료, task_splitter.py 진행 중)". 단, 작업이 단순해서 한 번에 끝나는 경우(예: 단일 파일 문자열 1곳 변경)는 중간 보고 없이 완료 보고만 해도 된다 — 그 사유를 계획서에 명시.
+- **리뷰어(M3 thinking)가 구현 결과를 REWORK 판정하면, **GLM을 거치지 않고 리뷰어의 REWORK 지시를 구현자(Flash/M3)에게 직접 전달**한다. GLM이 REWORK 사유를 재검토해서 구현자에게 전달하는 이중 단계를 생략해 비용·시간을 아낀다.**
+  - Why(2026-07-19 CEO 결정): GLM이 REWORK 지시를 한 번 더 검토해 구현자에게 전달하는 건 이중 작업이고 비용이 중복된다. 리뷰어가 이미 판단한 사유를 GLM이 다시 보는 건 부가 가치가 거의 없다. 리뷰→구현 사이클을 빠르게 돌리려면 리뷰어의 판정을 그대로 구현자에게 돌려보내는 게 효율적이다.
+
+How to apply: 리뷰 세션(M3 thinking)에서 REWORK 판정이 나오면 CEO는 그 REWORK 지시를 복사해 구현자 세션(Flash 또는 M3 thinking=none)에 직접 붙여넣는다. GLM은 이 단계에 개입하지 않는다. 단, 구현자가 리뷰어의 REWORK 사유에 의문이 들 때(예: 계획서와 충돌, 사유가 명확하지 않음, 잘못된 판정 의심)만 GLM에게 검토를 요청할 수 있다 — 이 경우 구현자가 GLM 세션에 "이 REWORK 사유 재검토 요청"을 올린다. REWORK 사이클이 끝나고 최종 PASS가 나오면 그때 GLM이 결과를 받아 CEO에게 보고한다.
 - **S23 테스트기기에 release APK를 설치할 때 INSTALL_FAILED_UPDATE_INCOMPATIBLE(서명 불일치)로 실패하면, 매번 물어보지 않고 adb uninstall 후 재설치를 즉시 진행한다.**
   - Why: 서버 계정 데이터는 Supabase에 있어 재로그인으로 복구되고, 로컬 캐시만 날아가는테스트기기 한정 저위험 작업이라 CEO가 반복 확인 없이 자동 진행을 승인함(2026-07-04). How to apply: PlanFlow 등 어떤 프로젝트든 S23 설치 중 이 에러가 나오면 확인 없이 adb uninstall <package> 후 adb install -r <apk>로 즉시 재설치한다. 프로덕션 서버 데이터나 다른 기기(S8 등)에는 적용하지 않는다 — S23 로컬 테스트 설치에만 한정.
+- **GLM이 세운 계획서는 구현 항목을 항상 2개 task로 분할한다 — **DeepSeek Flash 1개(단순 난이도) + MiniMax M3 1개(복잡 난이도)**. 각 task는 서로 다른 세션에서 병렬로 진행할 수 있도록 파일 비중첩·명확한 완료 조건·별도 REQUIRED_CHECKS를 가져야 한다.**
+  - Why(2026-07-19 CEO 결정): 단일 구현 task를 한 모델에게 몰아주면 병목이 생기고, 모든 task를 같은 모델에 맡기면 모델 강점이 안 살난다. DeepSeek Flash는 가벼운 단순 작업(라벨/문자열 변경, 단일 파일 수정)에 빠르고 저렴하고, MiniMax M3는 복잡한 로직 변경·디버깅·테스트 작성에 적합하다. 그래서 계획 단계에서 난이도를 2분하여 각 모델 강점에 맞춰 배정하면 병렬 진행이 가능하고 비용·시간이 모두 줄어든다.
+
+How to apply: 계획서를 쓸 때 구현 항목을 "단순(Flash용)"과 "복잡(M3용)" 두 묶음으로 나눈다. 분배 기준은 ①수정 파일 수 ②로직 변경 깊이 ③원인 진단 필요 여부 ④테스트 신규 작성 필요 여부다. 각 task는 파일이 겹치지 않게(비중첩) 설계하고, 각각 별도 REQUIRED_CHECKS와 위임용 컨텍스트(다른 세션에 복붙 가능)를 명시한다. 애매한 작업은 복잡(M3) 쪽으로 보수적으로 분류한다.
 - **marketing-skills 플러그인처럼 상시 활성화 비용이 큰(~7,733 토큰/세션) 플러그인은 자동으로 켜지 않고, 관련 주제(ASO·구독전환·referral·paywall·이메일마케팅·가격정책·카피라이팅 등)가 나오면 먼저 사용자에게 활성화 여부를 물어본 뒤 사용한다.**
   - Why: always-on 비용이 개발 작업 세션에서 낭비되므로, 사용자가 필요할 때만 쓰길 원함. How to apply: 마케팅 관련 주제가 대화에 등장하면 작업 전에 '마케팅 스킬 플러그인 활성화할까요?'라고 먼저 물어보고 허락받은 후 해당 스킬(/paywalls, /referrals 등)을 사용한다.
 - **워크트리에서 작업을 마치면 기능적으로 문제가 없는 한(빌드/테스트 그린, 회귀 위험 낮음) main으로 머지·푸시하는 것을 기본값으로 제안한다. 충돌이 발생하면 임의로 강제 처리(-X ours/강제푸시/리셋)하지 않고 대기 후 사용자에게 확인한다.**
@@ -132,34 +281,46 @@ tags: [layer/truth, type/std, ai/all]
 <!-- 프로젝트 공통 Claude Code 작업 규칙 -->
 
 ## FluxOS Pipeline Gate
-- FluxStudio 계열 프로젝트에서 사용자가 개발, 수정, 분석, 리뷰가 필요한 비단순 지시를 내리면 먼저 FluxOS 파이프라인을 사용한다.
-- 표준 흐름은 `Claude Code 계획 -> GLM 구현 -> Claude Code 리뷰 -> CEO 보고`다(Codex는 폐지 대신 dormant 상태로 필요 시에만 활성화).
-- 프로젝트 세션이 직접 코드를 수정해야 하는 경우에도 수정 전 `python E:\FluxStudio\.fluxos\run.py pipeline "<지시내용>" --project <Project> --source <session>` 또는 이미 생성된 task의 `pipeline-audit` 결과를 확인한다.
+> **적용 범위: CEO OS 경로 전용.** Desktop 세션(Claude Desktop·Codex Desktop)은 이 섹션의 대상이 아니다 — CEO OS 큐 등록이 `utils/desktop_queue_gate.py`로 **코드 차단**돼 있어 물리적으로 등록되지 않으며, 시작부터 검토 완료까지 그 세션 안에서 직접 수행한다(2026-07-17 CEO 결정, 날짜 무관 영구).
+
+- FluxStudio 계열 프로젝트에서 사용자가 개발, 수정, 분석, 리뷰가 필요한 비단순 지시를 내리면 먼저 FluxOS 파이프라인을 사용한다(Desktop 세션 제외 — 위 적용 범위 참조).
+- CEO OS 자동 파이프라인의 구현자·검토자 모델 배정은 `utils/routing_engine.py`(5종 사다리: GLM-5.2·MiniMax M3·DeepSeek Pro·DeepSeek Flash·GPT-5.4 Mini)가 단일 소스다. **Claude Opus/Sonnet·Codex GPT-5.6 Luna/Terra/Sol은 자동 라우팅에서 전면 제거**됐다(2026-07-16, 상세 사다리는 `AI_RULES.md` §7 참조). 대화형 Claude Code 세션이 직접 계획·리뷰를 맡는 흐름 자체는 유지되나, 그 세션이 CEO OS 자동 라우팅 대상은 아니다.
+- 프로젝트 세션이 직접 코드를 수정해야 하는 경우에도 수정 전 `python E:\FluxStudio\.fluxos\run.py pipeline "<지시내용>" --project <Project> --source <session>` 또는 이미 생성된 task의 `pipeline-audit` 결과를 확인한다. 단, Desktop 세션(Claude Desktop·Codex Desktop)은 이 등록 대상에서 제외된다 — 2026-07-17 CEO 결정에 따라 Desktop 세션은 CEO OS 큐에 절대 등록하지 않으며, 세션 안에서 직접 계획→구현→검토를 수행한다.
 - 진행 확인은 `python E:\FluxStudio\.fluxos\run.py pipeline-audit [TASK_ID]`를 사용하고, 최소한 `Claude Code 계획` 단계가 생성됐는지 확인한 뒤 구현에 들어간다.
 - Claude Code가 인증, 한도, 연결 문제로 실패하면 FluxOS의 Codex-only fallback을 사용하되, 최종 보고에 fallback 사유를 명시한다.
 - 긴급 단순 수정으로 파이프라인을 생략한 경우에는 생략 사유, 변경 범위, 검증 결과를 최종 보고에 반드시 남긴다.
 - 프로젝트 세션을 직접 열어야 하는 경우에도 먼저 `python E:\FluxStudio\.fluxos\run.py session start --project <Project> --source <session> --label "<세션명>" --cwd "<프로젝트경로>"` 또는 기존 세션에 `session attach`로 FluxOS 메타를 붙이고, 가능하면 `FLUXOS_SESSION_ID`, `FLUXOS_SESSION_PROJECT`, `FLUXOS_SESSION_TASK_ID`, `FLUXOS_SESSION_OWNER`, `FLUXOS_SESSION_SOURCE`, `FLUXOS_SESSION_LABEL`, `FLUXOS_SESSION_NOTE`, `FLUXOS_SESSION_CWD`를 함께 전달한다.
 
 ### 개발 지시 → 실행자 자동 선택 (Codex 위임 포함)
-- 개발·수정·리팩토링 작업은 기존 FluxOS 파이프라인과 모델 라우터를 사용한다(메인 세션이 직접 구현하지 말고 등록·계획 후 진행).
+- 개발·수정·리팩토링 작업은 기존 FluxOS 파이프라인과 모델 라우터를 사용한다(메인 세션이 직접 구현하지 말고 등록·계획 후 진행). **Desktop 세션은 제외** — 큐 등록이 코드로 차단돼 있고, 그 세션 안에서 계획→구현→검토를 직접 수행한다.
 - 계획 뒤 구현 실행자는 라우터가 자동 선택한다. 사용자가 명시적으로 Codex 위임을 요청한 경우에만 그 작업의 task metadata(`execution_policy=claude_plan_codex_implement`)로 해당 작업만 Codex 경로로 보낸다(전역 설정·기존 정책 변경 없음, 미지정 작업은 기존 중앙정책을 따른다).
-- **[명령] 이 세션이 Claude Code Desktop(`CLAUDE_CODE_ENTRYPOINT=claude-desktop`)이고 사용자 지시가 저장소 변경 개발 작업(버그 수정·기능 추가·리팩토링 등)이면, 직접 Edit/Write로 구현하지 말고 반드시 아래 staged 시퀀스를 한 응답(턴) 안에서 순서대로 실행하며 각 단계 전환 시 짧은 한국어 `[작업 진행]` 메시지를 사용자에게 직접 출력한다(가시 진행 알림).** 채팅 메시지는 이 task를 자동 생성하지 않으므로(자동 트리거 배선 없음) 어시스턴트가 직접 실행해야만 파이프라인이 발화한다. hook은 채팅 가시 출력을 강제하지 못하므로 이 진행 메시지는 어시스턴트가 본문에 직접 렌더해야 한다.
-  1. `python E:\FluxStudio\.fluxos\run.py pipeline "<사용자 지시>" --project <감지한 프로젝트> --source claude-desktop --execution-policy codex --gate-session <이 세션 id> --no-wait` 실행 → 출력의 `TASK_ID:` 줄에서 task_id를 얻는다(계획 동기 수행 + Codex 실제 dispatch 후 즉시 반환).
-  2. 그 직후 **[작업 진행] msg1**(계획 완료·Codex 전달·구현 모델·구현 중)을 출력한다.
-  3. `run.py progress-wait --task <id> --until done` 실행(구현 done 회수까지 블록) → 반환 텍스트를 **msg2**로 출력(구현 결과 수신·1차검토 진행 중). 차단/실패면 그 메시지가 원인·사용자 확인 대기로 오니 그대로 출력하고 중단.
-  4. `run.py progress-wait --task <id> --until review1` → **msg3** 출력(1차검토 통과·최종 QA 중, 또는 수정 필요 알림). REVIEW_ERROR는 통과로 표기하지 않는다.
-  5. `run.py progress-wait --task <id> --until terminal` → 완료까지 블록.
-  6. 마지막에 실행 요약 카드가 담긴 최종 report(`run.py report-last` 또는 progress-wait terminal 완료 후)를 응답 맨 위에 싣고 상세는 아래 둔다.
-  - 진행 메시지 값은 모두 progress-wait 실측 출력에서 오며 추측하지 않는다. 같은 단계 메시지를 두 번 출력하지 않는다(각 `--until` 경계는 서로 다른 단계). 긴 작업으로 progress-wait가 타임아웃하면(아직 진행 중) 같은 `--until`로 다시 호출해 terminal까지 이어간다. Desktop 세션이 파이프라인 등록 없이 프로젝트 소스를 직접 편집하려 하면 PreToolUse 게이트(`desktop_pipeline_gate`)가 차단하고 이 시퀀스를 안내한다.
-- 질문·설명·읽기전용 조사·계획만 요청·"직접 구현/조사만"(사용자 override)은 저장소 변경이 아니므로 위 명령 대상이 아니며, 어시스턴트가 직접 답한다. Claude Code CLI·데몬·CI·서브에이전트·직접 API 출처에는 이 Desktop 자동 파이프라인을 적용하지 않는다. 전환일·구현 모델·fallback 순서 등 가변 정책은 이 문서에 하드코딩하지 않고 중앙 코드(`config.py`·`ai_schedule.py`)가 정한다.
-- 계획 단계에서 그 지시가 실제 저장소 변경이 필요한지 구조화 값(`requires_repository_changes`/`task_intent`)으로 판정해 남긴다. 질문·설명·읽기전용 조사·계획만 요청이면 변경 불필요로, "직접 구현/조사만"은 사용자 override로 처리하며, 판정이 없거나 모호하면 자동 Codex를 적용하지 않고 기존 중앙정책을 따른다(fail-closed).
-- 구현자와 검토자는 분리한다(구현자와 다른 세션의 독립 1차검토 + 별도 2차검토). 구현 세션의 자기승인(done 내 자기평가)을 정식 검토로 인정하지 않는다.
+- **[정책, CEO 결정 2026-07-17, 날짜 무관 영구 정책] Desktop(Claude Desktop·Codex Desktop)과 CEO OS 큐는 완전히 분리된다.** Desktop 세션에서 시작한 작업은 CEO OS 큐에 절대 등록하지 않는다 — 특정 시점까지의 임시 조치가 아니라 영구 정책이다. Desktop 세션은 시작부터 검토 완료까지 그 세션 안에서 직접 수행한다(직접 Edit/Write 허용, 파이프라인 등록·Scope Lock 연결 불필요). 역방향도 동일하게 금지한다: CEO OS 큐에서 시작된 작업이 Codex Desktop 같은 Desktop 전용 도구로 실행되는 경로는 두지 않는다.
+  - CEO OS 큐에서 시작한 작업은 기존 CEO 파이프라인(`routing_engine.py` 5종 사다리)을 그대로 타고, 결과 보고는 CEO OS 커맨드센터 AI 채팅으로 수신한다.
+  - Desktop 세션의 구현 모델 라우팅은 세션 종류로 나뉜다: **Claude Desktop = Claude 모델군**(단순 Haiku·중간 Sonnet·계획/리뷰/고난도 Opus), **Codex Desktop = Codex 모델군**(아래 "Codex Desktop 내부 기본 모델 라우팅" 참조). 구체 모델명·매핑표는 이 문서에 하드코딩하지 않고 단일 소스(Claude는 `config/claude-roles.json`, Codex는 `07_System/codex/model-routing.json`)를 가리킨다.
+  - 날짜 기반 자동 전환은 두지 않는다. 과거 7/25 cutover처럼 시간이 지나면 자동 활성화되는 설계는 금지하며, 정책 변경은 오직 명시적 설정(코드·config) 변경으로만 이뤄진다.
+  - (정리, 2026-07-17 실측 확인) 과거 문서에 있던 Desktop 코드편집 강제 게이트 opt-in 안내와 CEO OS 파이프라인/락 연결용 Desktop 세션 등록 명령 안내는 제거한다. 전자의 게이트 코드는 이번에 저장소에서 제거됐고, 후자의 등록 명령은 실제 `run.py`에 존재한 적 없는 허구 명령이었다.
+  - **예외 (CEO 결정 2026-07-22): CC 모드가 켜진 세션.** 사용자가 그 세션에서 직접 `CC 켜줘`를 입력한 경우에만 등록 차단이 열린다. 정책 완화가 아니라 사용자가 세션 단위로 켠 opt-in이며, 켜지 않은 Desktop 세션은 종전대로 전면 차단된다(상세는 아래 "CC 모드" 섹션).
+
+### CC 모드 (Claude Code Desktop 사용자 전역 명령, CEO 결정 2026-07-22)
+- `CC 켜줘` / `CC 꺼줘`(대소문자 무관, 앞뒤 공백 허용, `모드`를 넣어도 됨 — `cc모드켜줘`·`CC 모드 꺼줘` 모두 인식)는 **사용자 전역 기능**이다. 어떤 프로젝트·폴더에서 연 세션이든 쓸 수 있으며, 사용자 전역 `~/.claude/settings.json`의 UserPromptSubmit hook 하나로만 등록한다(프로젝트 settings에 중복 등록 금지). 문장 일부·인용·질문에 포함된 경우에는 발화하지 않고, 사용자가 독립 명령으로 입력했을 때만 상태가 바뀐다.
+- **상태는 session_id 한정**이다. 명령을 입력한 그 세션만 ON/OFF가 되고 동시에 열린 다른 세션·다른 프로젝트 세션은 영향받지 않는다. 새 세션은 항상 OFF이며, 세션 종료·Desktop 완전 종료·재부팅 후에도 OFF다(TTL 8시간 + 부팅 시각 + 세션 프로세스 생존으로 판정하고, 종료 훅 성공에 의존하지 않는다). 전역 환경변수나 프로젝트 단위 플래그로 저장하지 않는다 — 단일 소스는 `.fluxos/utils/cc_mode.py`(저장 파일 `.fluxos/memory/cc_mode.json`)다.
+- **OFF면 기존 Desktop 방식 그대로**다. 훅이 아무것도 출력하지 않고, 선택한 Claude 모델이 직접 Edit/Write로 처리하며 Codex task 등록·큐 등록·진행 메시지 강제가 없다. OFF 동작을 바꾸기 위한 새 게이트를 만들지 않는다.
+- **ON이면 실제로 저장소 코드를 바꿔야 하는 요청만** CC 파이프라인을 탄다. 일반 질문·번역·요약·문서 작성·조사만 하는 요청·코드 변경 없는 분석·기존 코드 설명·상태 확인·사용자가 Claude 직접 처리를 명시한 요청은 CC가 켜져 있어도 평소처럼 직접 응답한다(정규식 분류기를 만들지 말고 실제로 파일을 수정해야 하는지로 판정한다).
+- **계획과 최종 QA는 작업 시작 시점에 실측 캡처한 그 세션의 모델**이 맡는다(Opus 고정 금지 — Fable로 시작하면 Fable, Sonnet이면 Sonnet). 모델 식별의 유일한 신뢰 소스는 세션 transcript의 `message.model`이며(`.fluxos/utils/cc_transcript.py`, 조회는 `run.py cc-status --session <id> --json`), 전역 settings의 `model` 값은 stale 기본값이라 쓰지 않는다. 확인 실패 시 모델명을 지어내지 않고 "모델 확인 불가"로 적는다. 작업 도중 세션 모델이 바뀌어 최초 모델로 최종 QA를 재현할 수 없으면 완료보고에 제한사항으로 명시한다.
+- **오케스트레이션·통합검토는 실제 Claude Sonnet이 기본**이고(Agent 도구 `model="sonnet"`), 고난도·고위험이거나 진행 중 판단 신뢰도가 떨어지면 실제 Opus로 승격한다(역할극 대체 금지). 계획 모델과 오케스트레이터는 서로 독립이다. 통합검토는 요약이 아니라 게이트이며 판정은 PASS / NEEDS_REVISION / BLOCKED / REVIEW_ERROR다. 재작업 상한을 초과하면 몰래 완료 처리하지 말고 BLOCKED로 보고한다.
+- **구현은 Codex**가 한다: 단순 `Claude Sonnet`, 일반·복잡 `gpt-5.6-luna`, 고난도·고위험 `gpt-5.6-terra`. 전역 `FLUXOS_CODEX_ENABLED`를 켜지 않고 task metadata(`--executor codex`)로만 그 task를 Codex 경로로 보낸다 — 다른 Desktop 세션이나 CEO OS 일반 큐의 라우팅은 영향받지 않는다.
+- **CC 구성에 없는 모델이 끼면 안 된다.** CC는 위 5단계(계획 모델 / 오케스트레이터 / Codex 3티어 / 오케스트레이터 통합검토 / 최초 계획 모델 최종 QA)만으로 완결된다. CEO OS 일반 큐의 라우팅 사다리(GLM·MiniMax·DeepSeek 등)는 CC 경로에 개입하지 않는다. 그래서 CC task는 등록 시 `--review-owner claude_session`을 반드시 붙여 파이프라인 자체 1차검토를 끄고, 독립 검토를 오케스트레이터 통합검토가 온전히 담당한다(이 플래그가 없으면 라우팅 1차검토가 딸려 붙어 사양에 없는 모델이 검토에 낀다 — 2026-07-22 실측).
+- **파일 충돌·병렬 상한은 코드로 강제한다.** 분해 결과는 `.fluxos/utils/cc_dispatch.py`의 `plan_batches()`에 통과시켜야 파일 범위 겹침 순차화·의존성 순서·동시 4개 상한이 실제로 보장된다(훅 지시문·문서는 강제가 아니다). task마다 독립 worktree를 쓰고 기존 방치 worktree를 재사용하지 않는다.
+- **진행 상태는 지시를 받은 그 채팅창의 assistant 본문**으로 단계별 출력한다(작업 시작·계획 완료·승격·dispatch·결과 회수·재작업·PASS·차단). 훅 stdout·additionalContext·로그·artifact·터미널·외부 대시보드는 표시로 인정하지 않는다. 문구는 실측 artifact에서만 만들고(`.fluxos/utils/cc_progress.py`) 실제 상태보다 앞질러 표시하지 않는다: TASK_ID를 다 받기 전 dispatch 문구 금지, `real_codex_spawn=False`인데 Codex 성공 표기 금지, fallback 은폐 금지, `REVIEW_ERROR`를 PASS로 표기 금지.
+- **서브에이전트는 CC 절차를 재귀적으로 다시 시작하지 않는다.** 오케스트레이터·검토 서브에이전트는 위임받은 역할만 수행하고 새 CC 파이프라인을 열지 않는다.
+- 계획 단계에서 그 지시가 실제 저장소 변경이 필요한지 구조화 값(`requires_repository_changes`/`task_intent`)으로 판정해 남긴다(CEO OS 큐 경로에 적용). 질문·설명·읽기전용 조사·계획만 요청이면 변경 불필요로 처리한다.
+- 구현자와 검토자는 분리한다(구현 provider와 다른 provider의 독립 검토, **2026-07-16부터 1단계로 통합** — 과거 1차검토+2차검토 2단계 구조 폐지). 구현에 쓰인 provider는 그 Task의 검토 후보에서 제외한다(자기검토 금지). 구현 세션의 자기승인(done 내 자기평가)을 정식 검토로 인정하지 않는다.
 - Claude 최종 단계는 중복 코드리뷰가 아니라 과정 감사(process QA)다: 계획이 요구를 반영했는지, 독립 1차검토가 실제로 검증했는지, PASS가 증거로 정당한지, 테스트가 사용자 요구를 증명하는지를 확인하고, 근거 없는 통과는 되돌린다.
-- Claude Desktop 개발작업 완료 시, FluxOS가 실제 실행 기록(구현 모델·독립 1차검토 모델·최종 QA 결과·테스트·최종 상태)에서 생성한 실행 요약 카드가 최종 보고 맨 위에 온다. 이 카드를 최종 응답 상단에 그대로 싣고 상세 보고는 그 아래 유지한다. 카드 값은 기억·추측이 아니라 실제 아티팩트에서 오며, 실행되지 않은 단계나 확인되지 않은 토큰·비용은 추측하지 않는다(미기록/미포집으로 둔다).
+- Desktop 세션(Claude·Codex 공통)은 CEO OS 큐에 등록하지 않으므로, 큐의 파이프라인 실행 기록(구현 모델·독립 검토 모델·QA 결과 등)에서 생성하는 실행 요약 카드를 적용할 수 없다. Desktop 세션의 완료 보고는 그 세션이 직접 수행한 계획·구현·검증·검토 내용을 응답에 그대로 담는다.
 - 새 Claude Desktop 세션에서는 첫 사용자 응답 맨 위에, 현재 FluxOS 파이프라인·정책 상태를 요약한 세션 배너를 한 번만 표시한다(세션당 1회). 세션 생성 직후 무입력 자동 출력은 Desktop 제약상 불가하여 UserPromptSubmit hook가 배너를 주입하고 모델이 첫 응답에 렌더하는 방식이다. 배너는 관찰·안내 전용이며 실행 정책을 바꾸지 않는다. 검증된 Desktop origin·등록 프로젝트에서만 표시하고 다른 출처(Claude Code/CLI/데몬/CI/API)에는 표시하지 않으며, 중앙 FluxOS를 못 찾으면 성공 배너 대신 경고를 낸다. 배너 값은 실제 런타임 상태에서 읽고 날짜·모델 라우팅을 문서에 하드코딩하지 않는다.
-- Claude Desktop 개발 작업 진행 중에는 주요 단계 전환(계획 확정·구현 완료/실패·1차검토·수정/모델 승격·최종 QA·승인 대기/차단)에서만 한국어 `[작업 진행 상황]`을 표시한다(현재 단계·현재 단계의 실제 모델·완료 단계의 실제 소요시간). 저수준 로그나 명령 한 줄마다 표시하지 않는다. 값은 실제 단계 이벤트(`run.py progress --task <id>`)에서만 읽고 단계·모델·시간을 추측하지 않으며, 계산 불가한 시간은 미기록으로 둔다. 실시간 메시지 수정은 Desktop 제약상 불가하므로 기존 메시지를 덮어쓰지 말고 전환 시 스냅샷을 새로 보여준다. 최종 완료 카드에는 단계별 소요시간을 포함한다. 질문·조사에는 진행 표시를 하지 않는다.
-- 검증된 Claude Desktop 세션에서는 세션 배너와 별개로, **모든 사용자 응답 맨 위에** 한국어 `[요청 처리 상태]`를 한 번 표시한다(매 응답, 4줄 안팎 간결). 방금 요청의 출처·요청 유형(개발/질문/조사)·저장소 변경 필요·적용 정책·현재 단계를 실제 데이터에서만 채운다(추측 금지). 개발작업으로 파이프라인에 등록하면 `run.py request-status --task <id>`의 실측 출력을 쓰고, 직접 답하면 "Claude 직접 응답 / Codex 실행: 없음"으로, 계획 확정 전에는 "판정 대기 / 계획 분석 중"으로 표기하며 확정 전 Codex 적용으로 표기하지 않는다. 개발 완료 시 이 상태 아래에 기존 Phase 4 실행 요약 카드를 결합한다. 사용자 노출 문구(상태·단계·판정·사유)는 전부 한국어로 렌더한다(내부 코드/JSON 키는 영어 유지). 다른 출처에는 이 상태를 적용하지 않는다.
-- 실제 검증(테스트·독립 1차검토·2차검토)을 통과하기 전에는 사용자에게 완료보고를 하지 않는다.
+- Claude Desktop 개발 작업 진행 중에는 주요 단계 전환(계획 확정·구현 완료/실패·검토·수정/모델 승격·최종 검증·승인 대기/차단)에서만 한국어 `[작업 진행 상황]`을 표시한다(현재 단계·현재 단계의 실제 모델·완료 단계의 실제 소요시간). 저수준 로그나 명령 한 줄마다 표시하지 않는다. 값은 그 세션이 직접 관측한 실제 단계 이벤트에서만 읽고 단계·모델·시간을 추측하지 않으며, 계산 불가한 시간은 미기록으로 둔다. 실시간 메시지 수정은 Desktop 제약상 불가하므로 기존 메시지를 덮어쓰지 말고 전환 시 스냅샷을 새로 보여준다. 최종 완료 보고에는 단계별 소요시간을 포함한다. 질문·조사에는 진행 표시를 하지 않는다.
+- 검증된 Claude Desktop 세션에서는 세션 배너와 별개로, **모든 사용자 응답 맨 위에** 한국어 `[요청 처리 상태]`를 한 번 표시한다(매 응답, 4줄 안팎 간결). 방금 요청의 출처·요청 유형(개발/질문/조사)·저장소 변경 필요·현재 단계를 실제 데이터에서만 채운다(추측 금지). Desktop 세션은 CEO OS 큐에 등록되지 않으므로 "Claude 직접 응답 / Codex 실행: 없음" 또는 그 세션이 직접 수행 중인 단계로 표기하고, CEO OS 큐 조회 출력(`run.py request-status` 등)을 인용하지 않는다. 사용자 노출 문구(상태·단계·판정·사유)는 전부 한국어로 렌더한다(내부 코드/JSON 키는 영어 유지). 다른 출처에는 이 상태를 적용하지 않는다.
+- 실제 검증(테스트·독립 검토)을 통과하기 전에는 사용자에게 완료보고를 하지 않는다.
 - 날짜·가격·구체 모델명·fallback 순서 같은 가변 정책은 이 문서에 하드코딩하지 않고 중앙 코드/설정(`config.py`·`ai_schedule.py`·`plans.json`)에 둔다.
 
 ## 기본 원칙
@@ -176,20 +337,29 @@ tags: [layer/truth, type/std, ai/all]
 - PowerShell 명령에서는 `&&`를 쓰지 않는다. 여러 명령을 이어야 하면 명령을 분리해서 실행하거나, PowerShell 네이티브 방식인 세미콜론과 `$LASTEXITCODE`/`if ($?) { ... }` 조건문을 사용한다.
 - Bash/CMD 전용 체이닝 문법을 PowerShell에 그대로 가져오지 않는다. 특히 `cmd /c`, `bash -lc`로 우회해 삭제/이동/생성 같은 파일 작업을 섞어 실행하지 않는다.
 
-## 모델 라우팅과 병렬 처리 (⚠️ 비단순 작업 필수 워크플로우 — 예외 없이 준수)
+## Codex Desktop 내부 기본 모델 라우팅 (⚠️ 구현 요청 완료 게이트)
+> Codex Desktop 세션의 버그수정·기능구현·리팩토링·최적화·연결·테스트보강·완성 요청에 기본 적용한다. 질문·조사·계획·테스트·검토만 명시한 요청은 그 범위를 넘지 않는다. 상세 절차의 Source of Truth는 `00_Constitution/codex-execution-spec.md`, 모델 매핑 원본은 `07_System/codex/model-routing.json`, 실행 Skill은 `end-to-end-delivery`다.
+
+- 기본 순서: Explorer 조사 → Planner 계획·완료조건 → 항목별 Simple/Complex 분류 → Simple/Complex Implementer 구현 → Test Executor 검증 → Failure Analyst 실패분석(필요 시) → 독립 Reviewer → 수정·재검증·재리뷰 → Integrator 최종 판정.
+- 모델 매핑: Explorer `Claude Sonnet` medium, Planner `gpt-5.6-terra` high, Simple Implementer `Claude Sonnet` medium, Complex Implementer `gpt-5.6-luna` medium, Test Executor `Claude Sonnet` low, Failure Analyst `gpt-5.6-luna` high, Reviewer `gpt-5.6-luna` high, Integrator `gpt-5.6-terra` medium, High-risk Escalation `gpt-5.6-sol` high.
+- 구현자는 자기 작업을 최종 승인할 수 없다. Reviewer 미실행, 필수 테스트 미실행·실패, 계획 항목 미완료, Reviewer `BLOCKER`/`HIGH` 잔존, 검증 공백이 중대한 상태에서는 `COMPLETE`를 출력하지 않는다.
+- 애매하거나 판단이 필요한 구현은 Simple로 낮추지 말고 Complex로 분류한다. 인증·권한·결제·보안·운영 DB·데이터 손실·광범위한 아키텍처·반복된 BLOCKER는 High-risk Escalation을 요청한다.
+- 실제 Codex가 지원하지 않는 hook, 모델 ID, config 필드, 강제 차단 기능은 만든 것처럼 보고하지 않는다. 지원 불가 항목은 Skill·custom agents·검증 스크립트·작업 상태 파일로 대체하고 한계를 최종 보고에 공개한다.
+
+## FluxOS 및 Claude Desktop 모델 라우팅과 병렬 처리 (⚠️ 비단순 작업 필수 워크플로우 — 예외 없이 준수)
 > 사용자가 매번 지시하지 않아도, 개발·수정·리팩토링·분석·리뷰 등 **비단순 작업은 아래 순서를 기본값으로 반드시 따른다.** 모델 라우팅과 별도 리뷰어 단계를 생략하지 않는다.
 >
 > **필수 체크리스트 (7단계):**
-> 1. **FluxOS 파이프라인 등록** — 위 "FluxOS Pipeline Gate"대로 `run.py pipeline` 등록(또는 pipeline-audit 확인) 후 진입.
+> 1. **FluxOS 파이프라인 등록**(CEO OS 경로만) — 위 "FluxOS Pipeline Gate"대로 `run.py pipeline` 등록(또는 pipeline-audit 확인) 후 진입. **Desktop 세션은 이 단계를 건너뛴다**(큐 등록이 코드로 차단됨) — 2번(계획)부터 이 세션 안에서 직접 수행.
 > 2. **계획 = `Claude`(상위 모델).** 범위·영향파일·리스크·검증기준 먼저 제시.
-> 3. **구현 = 난이도별 병렬 서브에이전트 위임.** 구현은 `GLM`을 주력으로 하며, 난이도에 맞는 서브에이전트로 위임한다. 파일 비중첩이면 동시 실행.
-> 4. **별도 리뷰어(`Claude`)가 전체 diff를 리뷰** — 계약 정합·회귀·규약 위반 점검. (구현 워커와 다른 별도 세션)
+> 3. **구현 = 난이도별 병렬 서브에이전트 위임.** CEO OS 자동 파이프라인의 구현자는 `routing_engine.py` 5종 사다리(GLM-5.2·MiniMax M3·DeepSeek Pro·DeepSeek Flash·GPT-5.4 Mini)를 따른다. 현재 세션이 직접 서브에이전트(Claude Agent 도구)로 위임할 때는 난이도에 맞는 Claude 모델(Haiku/Sonnet/Opus)로 위임한다. 파일 비중첩이면 동시 실행.
+> 4. **별도 리뷰어가 전체 diff를 리뷰**(구현 워커와 다른 provider/세션) — 계약 정합·회귀·규약 위반 점검, **1단계로 완결**(2026-07-16부터 2차검토 없음).
 > 5. 지적사항 **수정** → 6. **재리뷰** → 7. **검증(analyze/test/build)·보고**.
 > 메인(오케스트레이터) 세션은 **직접 구현을 쏟지 말고** 계획·분배·검토·보고만 담당한다. 이 흐름을 지키지 않고 메인이 다 처리하거나 모델 라우팅/별도 리뷰어를 건너뛰면 규약 위반이다.
-- 비단순 작업은 계획 -> 병렬 작업자 -> 별도 리뷰어 -> 수정 -> 재리뷰 순서로 진행한다.
-- 계획 단계는 `Claude`를 우선한다.
-- 일반 구현은 `GLM`을 주력으로 한다.
-- 난도가 높은 구현과 리뷰어 검토는 `Claude`를 우선한다. Codex는 폐지 대신 dormant 상태로 필요 시에만 활성화한다.
+- 비단순 작업은 계획 -> 병렬 작업자 -> 별도 리뷰어(1단계) -> 수정 -> 재리뷰 순서로 진행한다.
+- 계획 단계는 `Claude`를 우선한다(현재 세션이 직접 계획하는 경우).
+- CEO OS 자동 파이프라인의 구현·검토자 배정은 `routing_engine.py` 5종 사다리를 따른다(GLM 단독 주력 아님, Claude Opus/Sonnet·Codex GPT-5.6 Luna/Terra/Sol은 자동 라우팅 제외 — `AI_RULES.md` §7 참조).
+- 대화형 세션 자체의 서브에이전트 위임(Claude Agent 도구)은 위 CEO OS 라우팅과 별개로 난이도별 Claude 모델(Haiku/Sonnet/Opus)을 그대로 사용한다.
 - 계획이 끝나면 실제 작업은 가능한 한 무조건 병렬로 진행한다.
 - 파일, 모듈, 서브시스템이 겹치지 않으면 워커를 동시에 띄우고 병렬 완료를 우선한다.
 - 병렬 작업 후 자기 할 일이 끝난 서브에이전트는 즉시 닫는다.
@@ -300,7 +470,7 @@ tags: [layer/truth, type/gov, ai/all]
 - Windows에서는 iOS/Xcode 전용 MCP나 도구를 자동 실행하지 않는다.
 - `xcodebuildmcp`처럼 현재 플랫폼과 작업에 불필요한 보조 프로세스가 떠 있으면 확인 후 정리한다.
 - Java/Gradle/Kotlin 데몬은 빌드 중인지 확인하고, 빌드가 끝난 뒤 남은 재시작 가능한 데몬만 정리한다.
-- Android 빌드(`flutter build apk/appbundle`)는 직접 호출하지 말고 항상 `E:\AI_WIKI\scripts\flutter-build-guarded.ps1`를 경유한다. 모든 FluxStudio 프로젝트가 `GRADLE_USER_HOME=E:\.gradle`를 공유해 Gradle 데몬 레지스트리가 하나이므로, 동시 빌드 시 서로의 데몬에 stop 명령이 닿아 "Gradle build daemon has been stopped"로 빌드가 깨진다. 이 래퍼가 FluxOS 공유 자원 락 `android-build`를 claim해 한 번에 하나의 빌드만 돌리고, 점유 중이면 FIFO 큐로 대기 후 자동 승격되면 빌드하며, 종료 시 항상 release한다. 호출 예: `powershell -File E:\AI_WIKI\scripts\flutter-build-guarded.ps1 -ProjectPath <flutter_app 경로> -Project <프로젝트> -Owner <세션> -BuildArgs "apk --release"`.
+- Android 빌드(`flutter build apk/appbundle`)는 직접 호출하지 말고 항상 `E:\AI_WIKI\scripts\flutter-build-guarded.ps1`를 경유한다. **(2026-07-15 정정)** 과거엔 모든 FluxStudio 프로젝트가 `GRADLE_USER_HOME=E:\.gradle`를 공유해 Gradle 데몬 레지스트리가 하나였고, 락도 전역 `android-build` 하나였다 — 이 전역 락이 종료된 소유자와 대기열 취소를 구분 못 해 다른 프로젝트 빌드를 장시간 막는 사고(2026-07-13)가 나서, 지금은 **프로젝트 단위로 완전히 분리**돼 있다: 이 래퍼가 `GRADLE_USER_HOME`을 프로젝트 로컬 경로(`<ProjectPath>\.gradle-local\gradle-home`)로 설정해 Gradle 데몬/캐시 자체를 프로젝트별로 격리하고, FluxOS 락도 `android-build:<Project>`(예: `android-build:ValueFlow`, `android-build:FinFlow`) 키를 쓴다. 그래서 **같은 프로젝트 내 동시 빌드만 FIFO로 직렬화**되고, 서로 다른 프로젝트의 빌드는 병렬로 돌아도 안전하다(점유 중이면 같은 프로젝트 것만 대기, 자동 승격되면 빌드, 종료 시 항상 release). 호출 예: `powershell -File E:\AI_WIKI\scripts\flutter-build-guarded.ps1 -ProjectPath <flutter_app 경로> -Project <프로젝트> -Owner <세션> -BuildArgs "apk --release"`.
 - 활성 Flutter/Node/Vercel/Supabase dev server, test, build는 사용자의 다른 세션 작업일 수 있으므로 무작정 종료하지 않는다.
 - 오래 멈춘 진단 명령, 중복 status/diff, 종료된 작업의 잔여 프로세스는 정리 대상이다.
 - 자동 종료는 안전 목록에 한정한다. Codex 본체, 현재 작업 중인 Codex 세션, 활성 dev server, 활성 빌드/테스트, 브라우저, 보안/은행/드라이버 앱은 자동 종료하지 않는다.
@@ -315,8 +485,9 @@ tags: [layer/truth, type/gov, ai/all]
 
 ## 장시간 명령 운영
 - 장시간 명령은 가능하면 타임아웃, 로그 파일, 진행 확인 방법을 붙여 실행한다.
-- 30초 이상 변화가 없으면 대기·반복 확인을 기본값으로 삼지 않는다. 먼저 프로세스 CPU/RAM·하위 프로세스·로그·네트워크·입력 대기·락을 확인해 정지 지점을 분류하고 근거를 남긴다.
-- 분류 뒤에는 해당 원인에 맞는 가장 좁고 안전한 복구를 자동 적용한다(타임아웃/명령 경로 조정, 범위 축소, 정상 대체 경로 사용, 자신이 만든 잔여 프로세스 정리, 확인된 안전 락 해제 등). 복구 결과를 검증한 뒤 원래 작업을 즉시 재개한다.
+- **모든 Codex·Claude 세션은 장시간 작업을 스스로 감시한다.** 30초 동안 새 로그·파일 갱신·프로세스 CPU 변화가 없으면, 사용자에게 "확인하겠다"고만 말하거나 다음 지시를 기다리지 않는다. 즉시 프로세스 CPU/RAM·부모/자식 관계·로그 tail·산출물 갱신 시각·네트워크·입력 대기·공유 락을 확인해 정지 지점을 분류하고 근거를 남긴다.
+- **판정과 조치는 같은 작업 턴에서 끝낸다.** 정상 진행 근거(CPU/로그/산출물 변화)가 있으면 계속 감시하고, 종료·무출력 정체·입력 대기·반복 오류·고아 래퍼/락 등 비정상 근거가 있으면 가장 좁고 안전한 복구를 자동 적용한다(타임아웃/명령 경로 조정, 범위 축소, 정상 대체 경로 사용, 자신이 만든 잔여 프로세스 정리, 확인된 안전 락 해제 등). 복구 결과를 검증한 뒤 원래 작업의 다음 단계까지 즉시 재개한다.
+- **고아 작업 판정**: 명령의 부모 프로세스가 끝났고 산출물·로그 갱신이 멈췄으며 자식 래퍼/데몬만 남았으면, 그 작업은 정상 빌드가 아니다. 소유자가 현재 세션임이 확인된 경우에만 해당 작업 트리와 락을 정리하고 재시도한다. 다른 세션 소유 가능성이 있으면 소유자·heartbeat·실제 프로세스를 확인한 뒤 정상 근거가 없을 때만 정리한다.
 - 같은 명령을 무작정 반복하거나 원인 미확정 상태에서 주기 감시만 하지 않는다. 주기 감시는 원인이 확인된 외부 의존성·공유 자원 대기 또는 복구 효과 검증에만 쓴다.
 - 다른 세션 소유 가능성이 있는 프로세스·락·배포·데이터는 소유권을 확인하기 전 자동 종료·해제·변경하지 않는다. 파괴적·되돌릴 수 없는·외부 영향이 있는 복구만 사용자 확인 후 진행한다.
 - 병렬 실행은 파일/모듈/저장소가 겹치지 않을 때만 사용하고, 완료된 하위 작업은 즉시 닫는다.
@@ -347,7 +518,7 @@ tags: [layer/truth, type/gov, ai/all]
 - 컨텍스트 압축 없이 작업 시작
 
 ## 필수 행동
-- **비단순 작업(개발·수정·리팩토링·분석·리뷰)은 예외 없이 "모델 라우팅과 병렬 처리" 필수 워크플로우를 따른다: FluxOS 파이프라인 등록 → 계획(상위 모델) → 난이도별 병렬 서브에이전트 위임(단순=경량, 난도 높음=중간) → 별도 리뷰어 → 수정 → 재리뷰 → 검증. 사용자가 매번 지시하지 않아도 이것이 기본값이며, 메인 세션이 직접 다 처리하거나 모델 라우팅/별도 리뷰어 단계를 생략하면 규약 위반이다.**
+- **비단순 작업(개발·수정·리팩토링·분석·리뷰)은 예외 없이 적용 경로의 모델 라우팅·독립 검토·수정·재검토·검증을 따른다. Codex Desktop 구현 요청은 `agents-common.md`의 "Codex Desktop 내부 기본 모델 라우팅"과 `00_Constitution/codex-execution-spec.md`를 우선 적용한다(Explorer 조사 → Terra Planner 계획 → 항목별 Simple/Complex 구현 → Test Executor 검증 → Luna Reviewer 독립 검토 → Terra Integrator 최종 판정). CEO OS/Claude Desktop은 해당 경로의 별도 파이프라인 정책을 따른다. 사용자가 매번 지시하지 않아도 이것이 기본값이며, 구현자가 자기 승인하거나 모델 라우팅·독립 검토를 생략하면 규약 위반이다.**
 - **AI가 직접 할 수 있는 모든 것은 사용자에게 묻지 않고 바로 실행한다. 사용자에게는 직접 해야만 하는 것(콘솔 접근, 물리 기기 조작, 외부 서비스 설정 등)만 전달한다.**
 - 작업 전: 컨텍스트 압축 -> 계획 제시 -> 승인 대기
 - 작업 중: 계획 외 변경 발생 시 즉시 보고
@@ -360,7 +531,7 @@ tags: [layer/truth, type/gov, ai/all]
   - **애매하면 질문 쪽으로 기운다**(fail-safe — exhausted 모드의 fail-closed 철학과 동일한 임계값 철학 재사용, 새로 발명하지 않음).
 - 난이도와 모델이 맞지 않으면 모델 변경 후 진행
 - **작업이 끝나면 완료 보고 전에 스스로 Review를 수행한다**: 이번 작업에서 배운 것, 재발 방지 후보, 자동화 후보, 기존 규칙과의 충돌 여부를 스스로 점검한 뒤 보고한다(구 Obsidian Vault 흡수, 2026-07-03).
-- **작업 예상시간 선언 + 2배 초과 시 실측 재점검 + 뻔한 블로커 자동해결(2026-07-13, CEO 강한 반복 지시, E:\FluxStudio 전역·전 AI·모든 경로 공통)**: (1) 모든 작업, 특히 백그라운드 작업(테스트·빌드·커밋·긴 명령)을 시작할 때 원래 걸리는 **예상시간을 근거와 함께 전달**한다(예: FluxOS pre-commit 훅 커밋 ~2-3분, 전체 테스트 ~X분). (2) 예상시간의 **2배를 넘기면 무작정 더 기다리지 말고 실측으로 현재 상태를 재점검**한다 — 진행 중인가/멈췄나/오류·실패했나/락 존재/staged 여부/프로세스 생존/로그 tail을 확인하고, 지금까지 걸린 시간 대비 결과물이 맞는지 판단한 뒤 **근본원인을 찾아 해결**한다(같은 방식으로 재대기 금지). (3) 원인이 뻔하고 되돌리기 쉬운 블로커는 **사용자 지시 없이 스스로 해결**한다: 신규 파일이면 커밋 전 자동 `git add`(pathspec 매칭 실패 예방), stale `index.lock`(죽은 프로세스 것)은 제거 후 재시도(원자 시퀀스 `rm -f lock; git commit` + 락 경합 시 자동 재시도 루프), 포트충돌·미스테이징 등도 즉시 처리. (4) **리소스 최소**: 이 재점검·재시도 로직은 무겁지 않게 — 짧은 상태확인(로그 tail·상태파일 읽기) 위주, 무거운 전체 스캔·sleep 폴링 루프 금지, 완료 알림/이벤트 우선, 폴링 불가피하면 긴 간격. (기존 "AI가 직접 할 수 있는 건 바로 실행"·"장시간 작업 스스로 확인" 원칙의 강화·구체화.)
+- **작업 예상시간 선언 + 1N 1차 점검 + 2N 상한 + 뻔한 블로커 자동해결(2026-07-13 지시, 2026-07-17 CEO 개정, E:\FluxStudio 전역·전 AI·모든 경로 공통)**: (1) 모든 작업, 특히 백그라운드 작업(테스트·빌드·커밋·긴 명령)을 시작할 때 원래 걸리는 **예상시간 N을 근거와 함께 전달**한다(예: FluxOS pre-commit 훅 커밋 ~2-3분, 전체 테스트 ~X분). (2) **예상시간 N이 지나면 그 시점에 1차 점검**한다 — 먼저 그 작업 본인에게 문의(진행 중인가/결과 나왔나/문제 있나/어떤 문제냐 — 서브에이전트 SendMessage, FluxOS `run.py progress`·`request-status`·liveness·stage_events, 명령 로그 tail). **정상 진행 근거가 있으면 2N까지 계속 대기**, **문제 신호가 있으면 즉시 조치**(2N까지 기다리지 않는다). 자기보고가 불가능하면(무응답·로그 무변화·상태파일 부재) 그 자체가 문제 신호이므로 직접 조사로 에스컬레이션한다. (2-1) **2N은 상한**이다 — 2N을 넘기면 "살아있다"만으로 넘어가지 말고 "지금 속도로 남은 작업량이면 총 몇 분인가, 그게 이 작업의 합리적 비용인가"를 자문해 설계 결함(항목마다 subprocess spawn 등)을 의심하고 **근본원인을 해결**한다(같은 방식으로 재대기 금지). (3) 원인이 뻔하고 되돌리기 쉬운 블로커는 **사용자 지시 없이 스스로 해결**한다: 신규 파일이면 커밋 전 자동 `git add`(pathspec 매칭 실패 예방), stale `index.lock`(죽은 프로세스 것)은 제거 후 재시도(원자 시퀀스 `rm -f lock; git commit` + 락 경합 시 자동 재시도 루프), 포트충돌·미스테이징 등도 즉시 처리. (4) **리소스 최소**: 이 재점검·재시도 로직은 무겁지 않게 — 짧은 상태확인(로그 tail·상태파일 읽기) 위주, 무거운 전체 스캔·sleep 폴링 루프 금지, 완료 알림/이벤트 우선, 폴링 불가피하면 긴 간격. (기존 "AI가 직접 할 수 있는 건 바로 실행"·"장시간 작업 스스로 확인" 원칙의 강화·구체화.)
 
 ## 응답 원칙
 - 한국어로 응답
@@ -368,6 +539,7 @@ tags: [layer/truth, type/gov, ai/all]
 - 영향 범위 항상 명시 (어느 파일, 어느 기능)
 - 에러 발생 시 원인 -> 해결책 -> 예방법 순서로 설명
 - 사람은 작업 과정보다 결과를 본다. 가능한 모든 작업을 수행한 뒤 무엇을 변경했는지·왜 변경했는지·어떻게 검증했는지·남은 위험 요소·다음 권장 작업을 보고한다. 중간 진행 상황은 필요한 경우에만 보고하고 과정 서술을 늘어놓지 않는다(구 Obsidian Vault 흡수, 2026-07-03).
+
 
 ---
 tags: [layer/truth, type/gov, ai/all]
@@ -452,8 +624,14 @@ failure_policy.classify_pipeline_failure 분기 순서는 명시 END → quota(C
 ### [PREVENT] 계획모드 지시는 FluxOS 파이프라인 등록 후에만 진행(plan-gate 하드 강제) (2026-06-26)
 AI 세션이 CEO 파이프라인(계획→구현→리뷰→보고)을 무시하고 계획모드 지시도 직접 구현하던 문제. plan-gate 도입: 계획모드(Claude permission_mode=plan)/계획해(Codex) 지시는 run.py pipeline 등록 전 편집(Claude PreToolUse deny)·커밋(pre-commit FLUXOS_SESSION_ID 세션 commit-check) 차단. utils/plan_gate.py(gate_status ALLOW|REQUIRE_PIPELINE, FLUXOS_PLAN_GATE=block|warn|off), scripts/claude_hooks/plan_gate_hook.py, ~/.claude/settings.json 훅. fail-open·TTL 2h·세션한정. 규칙: 계획모드/'계획해' 지시는 반드시 run.py pipeline로 등록한 뒤 진행하라(미등록 편집·커밋은 plan-gate가 차단).
 
-### [PREVENT] AI 운용 일정: 2026-07-24까지 Claude Code 전용, 7-25부터 GLM 파이프라인 (2026-06-26)
-CEO 지시(2026-06-26): 200달러 Claude Code 무제한 기간이라 7/24까지 모든 작업을 Claude Code로만(GLM/API 비용 차단), 7/25부터 파이프라인(Claude 계획→GLM 구현→Claude 검토). 규칙: 사용자가 'GLM 사용' 명시(FLUXOS_IMPLEMENTER=glm) 전까지, 그리고 2026-07-25 전까지 모든 AI 세션은 GLM 디스패치 금지하고 Claude Code로 직접 수행한다. utils/ai_schedule.claude_only_period()가 단일 소스. plan_gate.mode()는 그 기간 off(편집 자유), ai_fallback_router는 GLM 제외. 7/25 자동 전환.
+### [PREVENT] AI 운용 일정 정책: 2026-07-24 Claude 전용은 5종 사다리 확정으로 폐기 (2026-06-26 지시 → 2026-07-16 실제 5종 사다리 확정 → 2026-07-17 CEO 확인)
+**원 지시(2026-06-26):** 200달러 Claude Code 무제한 기간이라 7/24까지 모든 작업을 Claude Code로만(GLM/API 비용 차단), 7/25부터 파이프라인(Claude 계획→GLM 구현→Claude 검토).
+
+**사문화 근본:** 2026-07-16 `utils/routing_engine.py:227`의 5종 사다리(GLM-5.2·MiniMax M3·DeepSeek Pro·DeepSeek Flash·GPT-5.4 Mini) 확정 시점에 PRE(`_POLICY_PRE`)와 POST(`_POLICY_POST`)가 **동일 사본** 처리되어, 날짜 기반 자동 라우팅 전환이 무력화됐다. 즉 2026-07-17 현재 자동 라우팅은 오늘부터 **이미 GLM/DeepSeek으로 운영되고 있다**. CEO 확인(2026-07-17): "의도한 상태다 — 그대로 둬라."
+
+**현재 단일 소스:** `utils/routing_engine.py` 5종 사다리 (변경 시 이 파일 수정). `plan_gate.mode()`의 날짜 자동활성은 2026-07-17 제거됨(커밋 10fb2ce) — 이제 명시 opt-in `FLUXOS_PLAN_GATE` env로만 작동.
+
+**교훈:** 날짜 기반 자동 전환을 문서·코드에 심으면 정책이 바뀌어도 문구와 시한폭탄이 남는다. 가변 정책은 반드시 중앙 코드가 단일 소스이고, 문서는 그 소스를 가리키는 참조만 두어야 한다.
 
 ### [PREVENT] consolidation 알림 노이즈 — advisory 후보가 30분마다 텔레그램 반복 (2026-06-26)
 consolidation tidy advisory 모드가 정리 후보(세션/산출물 등)가 있으면 30분마다 텔레그램 알림을 보내, 안 지워지는 후보가 계속 핑을 유발(노이즈). 수정: 텔레그램은 관리 필요한 경고(워크트리 폭증·미머지 누적 임계초과 alerts)에만, 실제 안전청소는 모니터 로그만, advisory 단순 후보는 무알림. apply 모드로 안전 후보 자동청소(후보 0 유지). 규칙: 주기 데몬 알림은 '조치 필요/변화'에만 텔레그램, 일상 housekeeping은 모니터 채널만.
@@ -608,6 +786,223 @@ Google/YouTube OAuth 데스크톱 클라이언트는 http 127.0.0.1 루프백 �
 
 ### [PREVENT] FinFlow resolved activity launch fallback (2026-07-13)
 Hard-coded MainActivity launch can fail when the installed package exposes a different launcher activity; monkey fallback has unsafe device-wide side effects.
+
+### [PREVENT] 음성 일정 수정이 새 일정 생성으로 떨어지는 회귀 방지 (2026-07-13)
+일정 제목에 시간과 회의 같은 생성 단서가 포함되면 strongScheduleAdd가 수정 동사보다 먼저 평가됐고, STT로 이름 일부가 누락된 수정 발화는 제목 대상 매칭이 없어 생성 폴백으로 이어졌다. 수정 동사를 생성 단서보다 우선하고, 수정 명령에서만 제목 또는 참석자 토큰 두 개 이상이 단일 일정에 일치할 때 기존 일정 편집 초안으로 연결한다.
+
+### [PREVENT] ffmpeg subtitles+apad filter_complex ENOSPC 큐 오버플로우 (2026-07-14)
+libavfilter 필터그래프에서 느린 subtitles(libass) 비디오 체인과 apad로 무한 패딩되는 오디오 체인을 같은 filter_complex 안에 함께 두면 두 체인 간 프레임 스레드 메시지 큐가 넘쳐 AVERROR(ENOSPC)='No space left on device'로 오표시되며 인코딩이 특정 프레임에서 중단됨(실제 디스크 용량과 무관, E: 383GB/C: 123GB 여유 확인함). 자막 번인과 오디오 딜레이+패딩을 한 filter_complex에 절대 같이 넣지 말고, 1) subtitles만 있는 비디오 전용 패스로 먼저 번인 후 2) -c:v copy로 오디오만 별도 filter_complex(mux)하는 2단계로 분리해야 재발하지 않음. 부수적으로 정지 프레임(freeze-frame) 세그먼트를 jpg에서 만들 때 -pix_fmt yuv420p를 명시하지 않으면 libx264가 yuvj420p(full-range)로 인코딩해 인접 세그먼트와 색공간이 어긋나는 것도 같은 세션에서 발견(별도 원인이나 같은 파이프라인에서 중첩 재발).
+
+### [PREVENT] status.showUntrackedFiles=no로 소스·회귀테스트 158개가 미추적 방치 (2026-07-14)
+루트 .git/config에 status.showUntrackedFiles=no가 설정돼 신규 파일이 git status에 전혀 표시되지 않았다. 그 결과 S02~S07의 코어 프로덕션 모듈 7개(execution_lifecycle/process_ownership/merge_queue/lifecycle_adapters/task_finalizer 등)와 회귀 테스트 20개(총 303개 test 함수)가 한 번도 커밋되지 않은 채 워크트리에만 존재했다. 자동 salvage도 추적 파일만 커밋하므로 이들을 건지지 못했고, 워크트리 정리 시 방지책(회귀 테스트)이 통째로 유실될 상태였다. 또한 .fluxos/.gitignore에 runtime/ 규칙이 없어 런타임 산출물 130개가 같은 untracked 더미에 섞여 소스를 가렸다. 방지: 신규 파일을 만든 작업은 커밋 전 반드시 git status --untracked-files=all로 확인하고, 런타임 산출물은 gitignore에 등록해 소스가 묻히지 않게 한다.
+
+### [PREVENT] ValueFlow 로컬 dart-defines.json이 다른 프로젝트(PlanFlow) Supabase URL로 stale (2026-07-14)
+scripts/valueflow-dart-defines.json은 sync-dart-defines.ps1이 .env 기준으로 자동생성하는 파생 산출물인데, 실제로는 .env에 SUPABASE_URL이 없어(PDMV_URL만 있음, 정상 폴백 대상) 스크립트가 재실행됐다면 pdmvgpgmchdptyzusyea로 정상 생성됐어야 함에도 파일 안에는 xqvvfnvmytjlblcngipn(PlanFlow 프로젝트 ref)이 박혀 있었다. 즉 과거 어느 시점에 이 파일이 수동 편집되었거나 다른 프로젝트 컨텍스트에서 잘못 복사돼 저장된 뒤, 이후 아무도 sync 스크립트를 재실행하지 않아 .env가 갱신돼도 파생 산출물만 계속 stale 상태로 남아있었다. Sprint 14-2 S23 릴리즈 빌드 직전에 발견 — 발견 못 했으면 빌드된 APK가 전혀 다른 Supabase 프로젝트를 바라봐 모든 검색·DS 기능이 조용히 실패했을 것(에러 없이 그냥 다른 프로젝트의 빈 데이터/404). 교훈: '.env가 단일 소스, json은 파생물'이라는 스크립트 주석의 원칙이 있어도 실제로 최신 상태인지는 검증하지 않으면 신뢰할 수 없다. 배포/빌드 직전에는 파생 config 파일이 실제로 최신 .env에서 재생성된 것인지(sync 스크립트 재실행 또는 최소 프로젝트 ref 문자열 대조) 확인하는 습관이 필요하다 — 특히 여러 Supabase 프로젝트(FinFlow/ValueFlow 공유 pdmv, PlanFlow xqvv 등)를 오가는 이 환경에서는 프로젝트 ref 혼동이 조용한 실패로 이어지기 쉽다.
+
+### [PREVENT] seed_audio voice_id 지정이 영어 억양까지 클론 + 과한 lowpass/aecho가 음질 파괴 (2026-07-14)
+MarketingFlow 광고 VO 제작에서 한국어 대사에 seed_audio를 쓰며 voice_id(영어권 프리셋 'Roman')를 지정했더니 응답에 voice_as_reference=true가 붙어 그 영어 음성 샘플을 레퍼런스로 클론했다. 그 결과 목소리 톤뿐 아니라 '영어 억양'까지 복제돼 한국어가 외국인 발음('회의'가 '웨이릿')으로 나왔다. voice_id를 아예 생략하면 모델이 해당 언어의 네이티브 음성으로 합성하므로 발음이 정상이다. 규칙: 비영어(특히 한국어) TTS를 seed_audio로 만들 때 영어권 프리셋 voice_id를 넘기지 말 것 — 목소리 지정이 곧 억양 클론이다. 성별/톤이 필요하면 pitch_rate 강제 조정 대신 해당 언어 네이티브 화자 샘플로 클론하거나 실제 사람 녹음을 쓴다(pitch_rate -12 같은 강제 시프트는 포먼트가 깨져 '뭉개진' 소리가 남). 별개의 동반 실수: '멀리서 말하는 느낌'을 낸다고 lowpass=5200+aecho를 걸었더니 고음이 전부 깎여 '마이크 물먹은 소리'가 됐고, speech_rate를 0으로 방치해 발화가 늘어졌다(3.4s). 원거리감은 과한 lowpass가 아니라 볼륨/약한 EQ로 최소 처리하고, TTS 속도는 speech_rate로 명시 조정한다(20 적용 시 1.92s로 정상화).
+
+### [PREVENT] Korean male VO via video-model audio extraction not TTS (2026-07-14)
+TTS path could not produce a natural Korean male voice: English preset voice_id clones the English accent via voice_as_reference; omitting voice_id yields native Korean but female-only default; forced pitch_rate shift breaks formants; no Korean male voice installed on the system; the inworld engine with Korean male voices is game-pipeline-only. Solution: generate a short clip with seedance_2_0 generate_audio=true showing a Korean male manager speaking the line, then extract only the audio track. The model makes the character speak the language natively so intonation is real acting, not TTS. Use mode=fast, 480p, minimum duration since video quality is discarded (6 credits). Clean the extracted audio with afftdn and compress inter-phrase gaps only; never apply heavy lowpass or aecho (causes muffled underwater sound).
+
+### [PREVENT] CEO OS 안전정리: dead code 제거+terminal 판정 단일화 (2026-07-15)
+CEO OS에 호출자 0인 죽은 라우트/함수(dead code)와 task_queue.is_terminal을 안 쓰고 로컬에서 재정의한 하드코딩 terminal set이 누적됨. 로컬 terminal set 재정의는 멤버 드리프트로 stranded-DONE 오판을 유발할 수 있어 단일 소스(pipeline/task_queue.is_terminal)로 통일해야 한다.
+
+### [PREVENT] adb-single-device mDNS 실패 시 저장 endpoint 직접 connect 폴백 (2026-07-15)
+adb-single-device.ps1이 S23 무선디버깅 자동연결을 mDNS 브로드캐스트에만 의존했는데, PC가 유선(이더넷)·폰이 Wi-Fi로 서브넷 경계를 넘거나 Tailscale이 멀티캐스트를 간섭하면 adb mdns services가 비어 자동탐색이 실패한다(실측: ADB_MDNS_AUTO_CONNECT=1·방화벽 adb.exe Allow·Openscreen 데몬 정상인데도 discovery 0건, Bonjour 백엔드는 미설치라 교체 불가). 그 결과 무선디버깅을 켜도 기기가 안 잡혀 설치가 막혔다. 수정: 래퍼에 폴백 추가 — mDNS 창 이후 타겟 S23 serial이 안 잡혔고 roster 슬롯에 last_endpoint(IP:포트)가 있으면 adb connect로 직접 연결하고, 타겟이 IP:포트로 연결될 때마다 현재 endpoint를 roster에 재저장해 다음 폴백이 항상 최신값을 쓰게 한다(기존 device_key 영속 선례와 동일 패턴). 실작동 검증: S23 강제 disconnect 후 래퍼 실행 시 저장 endpoint로 자동 재연결 성공. 무선디버깅 토글로 포트가 바뀌면 그 세션에서 mDNS나 최초 1회 연결로 endpoint가 갱신돼 이후 폴백이 유효.
+
+### [PREVENT] 검증용 until 무한루프를 백그라운드에 걸고 117분 방치 — 2배 초과 자가점검 규칙 50회+ 재발 (2026-07-16)
+행동 규칙(2배 초과 시 재점검)이 반복 교육에도 재발하는 구조적 원인 2개 확정: (1) 백그라운드 Bash는 timeout 파라미터가 강제되지 않아(실측: 240000ms 지정, 117분 생존) 2배 알람을 timeout에 위임하면 알람이 안 울림. (2) until 성공조건 대기 루프는 실패(잘못된 파일 수정으로 조건 영원히 거짓)에 무한 침묵 — 완료/실패 알림 모두 없어 턴 종료 후 재호출 불가. 동반 원인: 수정 대상이 실제 서빙 경로인지 호출자 역추적 생략(api.py 미사용 사본 수정). 방지: 예상 5분 이하 검증은 백그라운드 금지(포그라운드 단발), until 검증 루프 전면 금지, 대기 필요 시 timeout 강제되는 Monitor 도구 사용, 수정 전 호출자 grep 의무
+
+### [PREVENT] 2N 시간예산 점검은 문의 우선(직접조사는 무응답 시만) + E:FluxStudio 전역 적용 (2026-07-16)
+CEO 확정(2026-07-16): 백그라운드 작업 2배 초과 점검 시 무조건 무거운 직접 조사부터 하지 말고 작업 본인에게 먼저 문의한다(진행 중인가/결과 있나/문제 있나/어떤 문제냐 — 채널: 서브에이전트 SendMessage, FluxOS task progress·request-status·liveness·stage_events, 명령 로그 tail). 자기보고가 불가능한 상태일 때만 직접 조사 에스컬레이션. 이 프로토콜(예상시간 선언+2N 알람+문의 우선)은 세션 한정이 아니라 E:FluxStudio 안의 모든 백그라운드·장시간 작업 단위에 기계 장치로 적용한다.
+
+**(2026-07-17 CEO 개정 — 점검 시점을 2N에서 1N으로 당김)** 2N까지 아무것도 안 하고 기다리면 실패를 최대 2N 동안 방치하게 된다(N=30분이면 1시간 침묵). 개정: **1N에 1차 점검(문의)**를 한다 → 정상 진행 근거가 있으면 2N까지 계속 대기, **문제 신호가 있으면 즉시 조치**(2N 기다리지 않음). 2N은 상한선으로 유지(2N 초과 시 "살아있음"으로 넘어가지 말고 설계 결함 의심·근본원인 해결). 기계 장치: 백그라운드 발사 시 알람을 `Monitor(timeout_ms=N)`으로 걸고, 1N 점검이 정상이면 남은 N만큼 재장착한다.
+
+### [PREVENT] GT Override가 QA 규칙·LLM 검토 REWORK 합의를 뒤집어 무산출 구현을 REVIEW_PASS로 둔갑(허위 DONE) (2026-07-16)
+glm_org QA에서 W01 FAILED(파일 0개 작성)+규칙기반 REWORK+LLM검토 REWORK인데 GT Verdict GT_WARN(score 60)의 GT Override=True가 최종 판정을 REVIEW_PASS로 뒤집었고, 이후 최종 검토자(minimax)도 실코드 검증 없이 done.md 서술만 보고 PASS — 산출물 0인 task가 done terminal로 종결(TASK_20260716_155807 실증). 안티패턴 'or PASS fail-open 금지'의 변종: override는 상향(REWORK→PASS) 방향으로 작동하면 안 되고 하향(PASS→REWORK) 안전 방향만 허용해야 함. 후속 수정 대상: glm_org QA의 GT override 로직을 방향 제한(fail-closed)으로 교정 + 최종 검토 프롬프트에 '파일 변경 실존 확인 필수' 강제
+
+### [PREVENT] ESTsoft TMPDIR 리다이렉트 — 임시파일이 인덱싱·백신검사 위치에 쌓여 업데이트 후 인덱서 폭주 (2026-07-16)
+느려짐이 방지책(알약 예외) 후에도 재발한 3중 원인. (1) 알약 예외가 Windows 업데이트(빌드 8737→8875)+재부팅 후 소실돼 프로세스 실행이 다시 2~30초(정상 130ms). (2) ESTsoft(알약)가 User 환경변수 TMPDIR을 C:\Users\Public\Documents\ESTsoft\CreatorTemp로 영속 설정 — python tempfile은 TMPDIR을 TEMP보다 우선하므로 모든 python/pytest 임시파일이 그 위치에 생성됐다. 그 위치는 Public Documents라 Windows 검색 인덱싱 대상+백신 검사 대상이라는 최악의 조합. (3) 대량 pytest 실행이 임시 git repo 3,294개를 거기 축적했고, Windows 업데이트가 인덱스 리빌드를 트리거하자 SearchIndexer가 그 수천 repo를 크롤하며 CPU 100% 지속. 부차로 claude.exe 20개+/5~6GB 누적이 얹힘. 조치: TMPDIR User env 제거(python 임시 정상화 실측), 24시간 이전 잔재 1,871개 삭제(2,848→977, 인덱서 100%→0.8% 실측), perf-canary 상시 감시 등록(10분 주기: git 실행비용>1s=백신예외 풀림/TMPDIR 재오염/인덱서 폭주/claude 10GB+를 텔레그램 경보). 방지 원칙: (a) 느려짐 진단 시 파일 I/O(stat 루프)와 프로세스 실행(git --version) 비용을 분리 측정하라 — I/O 정상+실행만 느리면 백신/커널콜백, 인덱서 CPU 확인. (b) python 임시 경로는 TEMP만 보지 말고 tempfile.gettempdir() 실측으로 확인하라 — TMPDIR이 우선하며 서드파티가 박아둘 수 있다. (c) 재부팅/OS 업데이트 후에는 백신 예외·환경변수가 유지되는지 재검증하라 — 카나리아가 자동화함. (d) 방지책은 '한 번 조치'가 아니라 '풀림을 감지하는 감시'까지 포함해야 강력하다.
+
+### [PREVENT] 미묘한 git 절차(hunk 분리)를 Haiku에 배정해 타 세션 hunk가 내 커밋에 흡수됨 — 라우팅 오판 (2026-07-17)
+2026-07-17 실사례. stale 문서 정정 작업을 '텍스트 1곳 수정 + 스크립트 실행'으로 보고 Haiku에 배정했다. 지시문에는 'anti-patterns.md는 이미 dirty이니 git diff로 타 세션 hunk를 확인하고, 있으면 git apply --cached로 내 hunk만 분리해 pathspec 없이 커밋하라'고 명시했다. 그런데 워커는 'pathspec 커밋으로는 같은 파일 안의 다른 hunk를 보호할 수 없다'까지는 정확히 판단하고 거기서 멈춰, 타 세션이 추가한 방지책 10개(~100줄)를 자기 커밋(0a6a672)에 함께 넣었다. 실측: 107줄 추가 중 내 정정은 2줄. 데이터 유실은 0(타 세션 작업 보존됨), attribution만 오염. history 수정(rebase/amend)은 타 세션이 그 커밋 위에서 작업 중일 수 있어 더 위험하므로 되돌리지 않고 기록으로 남김. 근본: 작업을 '표면 난이도'(텍스트 1곳 = 단순)로 분류했는데 실제 난이도는 '동시편집 환경에서 hunk 단위 격리'라는 절차적 판단에 있었다. 그 판단은 (a)pathspec이 파일 단위지 hunk 단위가 아님을 이해하고 (b)그 한계에 부딪혔을 때 patch 분리로 전환하는 2단계 추론이 필요한데, 지시문에 절차를 써주는 것만으로는 경량 모델이 그 전환을 수행하지 못했다. 방지: 작업 난이도는 '수정할 코드의 양'이 아니라 '요구되는 판단의 종류'로 분류한다. 특히 (1)동시편집 파일(dirty 상태)을 다루거나 (2)git 이력·인덱스를 조작하거나 (3)fail-open/fail-closed 방향을 판정하거나 (4)'A가 안 되면 B로 전환'하는 조건부 절차가 들어가면, 코드가 1줄이어도 Sonnet 이상으로 배정한다. 오케스트레이터 체크리스트: 워커 배정 전 '이 작업에 조건부 분기나 실패 시 대체경로가 있는가?'를 자문하고, 있으면 경량 모델 금지. 부수 규칙: 이미 dirty인 파일을 수정하는 작업은 배정 시점에 그 사실을 난이도 산정에 반영한다(clean 파일 수정과 같은 난이도가 아니다).
+
+### [PREVENT] 워크트리가 supervisor/pipeline/scheduler 데몬 셋 전체를 복제해 메인과 동시 tick(구코드로 큐·락 경쟁) (2026-07-17)
+task worktree(E:/FluxStudio-worktrees/fluxos/fluxos-task-20260717-002400)에서 데몬 3종(supervisor 412360/pipeline-daemon 412480/scheduler-daemon 399836)이 09:54에 기동돼 메인 체크아웃 데몬과 동시 실행. 부모 프로세스는 전부 죽어 고아 상태였고, 워크트리 체크아웃 코드라 메인의 최신 수정(1N 시간예산 점검)이 반영 안 된 구 convergence로 tick. PID 파일은 메인 것만 등록해 중복이 가시화되지 않음 — 기존 dedupe(5560a41 계열)가 이 경로를 못 잡음
+
+### [PREVENT] 1N/2N 알람만 걸고 주기 진행 이벤트를 안 걸어 22분간 이상신호(CPU 5%·7%) 방치 — 침묵을 정상으로 착각 (2026-07-17)
+예상시간 N 선언과 Monitor(timeout_ms=N) 알람 장착은 규칙대로 했는데도 CEO가 22분 시점에 먼저 물어봄(=실패). 뚫린 지점은 알람이 아니라 Monitor grep 필터: 최종 요약줄('=+ passed/failed =+')에만 걸어서 그 사이 이벤트가 0건이었고, 그 침묵을 정상 진행으로 착각했다. 실제로는 CPU 5%(22분간 71초)+진행률 7%(이 속도면 총 5시간)라는 이상신호가 로그에 이미 있었고 5분 시점에 계산 가능했다. 근본: 1N/2N 알람은 상한 감시일 뿐이며 그 사이 이상신호는 주기 진행 이벤트로만 보인다 — 알람 하나만 걸면 N분 내내 아무것도 안 보게 된다(Monitor 규약의 silence is not success를 필터 설계에 미적용). 방지: 백그라운드 발사는 3겹(본작업+주기 진행 이벤트+1N 알람), 진행 이벤트마다 잔여시간 재계산(현재 X%/경과 T → 총 T/X*100분이 선언 N의 2배 궤도면 알람 안 기다리고 즉시 조치), CPU 5% 근처는 계산 아니라 I/O·락 대기 = 설계/환경 결함 신호.
+
+### [PREVENT] perf-canary가 부하성 지연을 백신 예외 풀림으로 오귀속 + 감시 스크립트 자체가 untracked (2026-07-17)
+perf-canary.ps1이 git 중앙값 >1000ms면 원인 불문 "백신 예외 풀림 의심"으로 하드코딩 알림 -> 일시적 시스템 부하 스파이크를 백신 문제로 오귀속해 반복 오탐. CEO가 "이게 아닌데 계속 울리면 신경쓰인다"고 지적.
+
+오진의 구조: 증상(git 느림)에 원인이 하나뿐이라고 가정하고 그 원인을 메시지에 박아넣음. 실제로는 같은 증상에 최소 3원인(백신 콜백 / CPU 부하 / 디스크 I/O 경합)이 있는데 구분 장치가 없었음. 2026-07-16 원 사고 때 원인이 백신이었다는 이유로 그 원인이 유일 원인처럼 굳어짐.
+
+구분법(실측으로 확립): 1)백신 예외 풀림은 지속적으로 느림(2~30초 계속). 부하성 지연은 진동(68ms~3235ms 왕복) - 예외 설정은 10분마다 저절로 켜졌다 꺼지지 않는다. 2)느린 시점 CPU를 같이 측정하면 갈린다(부하성은 CPU 68~100%). 3)백신이 주범이면 git spawn 동안 백신 프로세스 CPU가 증가해야 함 - 8회 spawn에 AUEPMaster/AYAgent.aye CPU 증가 4초 미만이면 백신 아님.
+
+실제 범인: 고아 find.exe(부모 죽음)가 find / -iname settings.json -path *claude*로 전 드라이브 스캔, CPU 1518초 누적. 어떤 세션의 폭주 도구 호출로 추정(부모 죽어 추적 불가).
+
+수정: CPU 부하 게이트 3분기(normal / load / antivirus_suspect), 저부하 연속 2회부터만 백신 알림, CPU 측정 실패는 fail-closed로 백신 후보 유지, 지속 고부하 3회는 top 프로세스 실은 sustained_load 별도 경보. 실운영 검증: 11:04:49 git=2875ms cpu=76% cat=load로 알림 억제 확인.
+
+일반화 규칙: 감시/알림 스크립트에서 한 증상에 원인을 단정해 메시지에 하드코딩하지 말 것. 증상 임계만 넘으면 알리는 게 아니라, 최소 하나의 교차 지표(여기선 CPU)로 원인을 분기하고, 단발 스파이크는 연속성 조건으로 걸러라. 알림 문구엔 단정("알약 예외 재등록 필요") 대신 실측값(git Xms / CPU Y% / 연속 N회)을 실어 사람이 판단하게 하라.
+
+부수 발견: perf-canary.ps1/install-perf-canary.ps1이 만들어진 이래 한 번도 커밋된 적 없었음(untracked). anti-patterns.md의 2026-07-05 전례(adb-device-resolver.ps1 등)와 동일 패턴 재발. 상시 감시 스크립트를 새로 만들면 그 자리에서 추적 등록할 것 - 안 하면 방지책 자체가 워크트리 정리 시 유실된다.
+
+### [PREVENT] 훅·차단 게이트는 실제 하네스 스키마로 실발화 실측 + 양방향(뚫림·과차단) 검증 필수 (2026-07-17)
+사고: Explore 서브에이전트가 재귀 탐색 명령(디렉토리 루트 앵커 지정, 파일명 조건 검색)을 timeout 미지정으로 실행 → 하네스가 2분 7초 뒤 자동 백그라운드 전환 → 에이전트는 그 통지만 받고 종료 → 고아. CPU 1518초/3시간 40분. 11:28에 동일 명령 재발(2356초). 고아 11개 정리로 CPU 3008초 회수. 이 부하가 perf-canary git 측정을 느리게 해 "백신 예외 풀림" 오탐을 유발했다(별건 방지책).
+
+근본 3중:
+1. 자동 백그라운드 전환이 실패가 아니라 정상처럼 보인다 — "Command running in background with ID: ..." 통지를 성공으로 읽고 넘어간다. 서브에이전트는 종료하며 자기 백그라운드 프로세스를 회수하지 않는다.
+2. 전 드라이브 재귀 탐색 명령이 Windows 다중 드라이브(C:/E:/I:)에서 얼마나 무거운지 인식 못 함 — POSIX 습관 그대로.
+3. [핵심] 있는 줄 알았던 게이트가 죽어 있었다 — git_command_guard.py:198이 data.get("command")를 읽는데 Claude Code PreToolUse의 실제 스키마는 tool_input.command다. 실측: top-level 스키마 → deny, tool_input.command → allow. 만들어진 이래 한 번도 차단한 적 없음. 근거: background_task_watchdog.py:775-777이 tool_input에서 값을 꺼내며 정상 동작 중. 2026-07-17 방지책의 "Haiku 워커가 타 세션 hunk 흡수" 사고 때 이 가드가 막았어야 했는데 못 막은 이유가 이것이다.
+
+수정: scan_command_guard.py 신설(PreToolUse Bash deny, 커밋 127b8c0). 판정은 이름 denylist가 아니라 3단 구조 — (1)재귀 탐색기 진입 토큰(basename+casefold+.exe 정규화) (2)루트 앵커(따옴표 제거 후 비교) (3)깊이 제한 부재. quote-aware 문자 스캐너로 세그먼트 분리. rg 제외(gitignore 존중=권장 대안). deny 메시지에 대안 4종. 워크트리 커버. git_command_guard 스키마 수정 + 같은 세그먼트 분리. 회귀 73건. 훅 중앙값 70~84ms.
+
+검증에서 배운 것 — 이게 전파해야 할 행동 규칙이다:
+
+1. 훅·차단 게이트는 실제 하네스 스키마로 실발화를 실측하라. 유닛 테스트가 자기가 만든 payload로 통과하는 건 스키마가 맞다는 증거가 아니다. Claude Code PreToolUse의 실제 계약은 tool_input 하위 필드이지 최상위 필드가 아니다. 死게이트는 "없는 것"보다 나쁘다 — 있다고 믿게 만들어 그 뒤로 아무도 안 본다. 이 가드는 죽은 채로 몇 주를 살아남았고, 그 사이 그 가드가 막았어야 할 사고가 실제로 났다.
+
+2. 차단 게이트는 뚫림(under-block)과 과차단(over-block) 양방향을 같은 강도로 실측하라. 한쪽만 보면 반드시 다른 쪽이 터진다. 실증: 1차 구현은 개행 세그먼트를 분리 안 해 실전 완전 우회 — Claude Code Bash 도구는 멀티라인 스크립트를 상시 보내는데 단일 라인만 테스트해 통과로 오판했다(검토자가 자기 Bash 호출에서 실제 위험 명령을 통과시켜 2분 타임아웃을 내며 발견). 2차 수정(정규식 분리)은 인용부호를 몰라 과차단 — 커밋 메시지나 echo 문자열 안에 세미콜론과 위험 키워드가 인용부호로 감싸여 있을 뿐인데 차단됐다(검토자가 heredoc으로 테스트를 쓰다 15분에 3번 실제 차단당해 발견).
+
+3. 그 수정이 새로 도입한 로직 자체가 만드는 위험을 테스트하라. 실증: 신규 회귀 테스트가 "구분자 문자가 전혀 없는 단순 명령"만 allow 케이스로 검증했다. 정작 새로 넣은 세그먼트 분리가 만드는 위험(인용부호 안 구분자)은 한 건도 테스트되지 않아 과차단이 그대로 나갔다.
+
+4. 명령 파싱은 Claude Code Bash가 멀티라인을 상시 보낸다는 전제로 설계하라. 단일 라인 테스트만으로 통과 판정 금지.
+
+5. 서브에이전트에도 PreToolUse가 발화한다(2026-07-17 실측 확정). 훅이 사고 당사자 경로를 실제로 커버하는지는 서브에이전트로 직접 확인해야 안다 — 메인 세션 확인만으로는 모른다.
+
+6. 장시간 Bash에 timeout을 명시하고, 전 드라이브 재귀 탐색 명령을 쓰지 마라. 대신 Glob 도구, 경로 한정, 깊이 제한, gitignore를 존중하는 검색 도구를 쓴다. 이제 scan_command_guard.py가 기계적으로 차단하지만, 차단당하면 우회를 찾지 말고 대안을 써라.
+
+알려진 잔여 한계(의도적 미수정): bash ANSI-C 인용 문법 안의 이스케이프된 작은따옴표를 스캐너가 인식 못 해 특정 중첩 인용 조합은 fail-open 통과한다(검토자 실측 재현). 미수정 근거 — (a)사고 벡터는 평범한 무제한 재귀 탐색이지 난독화가 아니다, (b)2026-07-11 결정("Gateway는 협조적 모델의 audit trail·steering이지 작정한 adversary에 대한 하드 경계가 아니다 — 문자열 스캔으로 난독화를 막으려 하면 방어력 없이 막힌 척하는 死게이트만 는다")과 동일 성격, (c)분리기를 건드릴 때마다 과차단 회귀가 2번 났다. 진짜 하드 격리가 필요해지면 문자열 스캔이 아니라 OS 샌드박스로 가야 한다.
+
+### [PREVENT] 스킵 태그 정규식 미매칭을 '태그 없음'으로 오안내 (2026-07-17)
+4종 skip 태그 정규식(prevention-skip/watchdog-skip/worker-commit-skip/subagent-skip)이 re.DOTALL 없이 (.+?)라 태그 사유에 개행이 있으면 매칭 실패하는데, 차단 메시지가 '태그를 추가하세요'라고 태그 부재를 단정해 이미 태그를 쓴 사용자를 오도함. 증상(형식 불일치)과 안내(부재)가 불일치. 수정 방향은 정규식 확대(fail-open)가 아니라 느슨한 접두 탐지로 안내 문구만 정정.
+
+### [PREVENT] 안전 게이트 임계값을 실측 없이 정하면 권장 대안을 따른 사용자가 막힌다 (2026-07-17)
+사고: 오늘 신설한 scan_command_guard.py가 깊이 제한(-maxdepth N, N<=3)이 없으면 루트 재귀 스캔을 deny로 판정했다. 임계값 3은 계획 단계에서 실측 없이 고른 값이었다. 실제 다른 세션(71b3f210, 워크트리 quizzical-edison-03276d)이 find / -maxdepth 4 -iname settings.json | grep -i claude로 차단됐다 - 우리가 deny 메시지에서 권장한 대안(-maxdepth 쓰기)을 정확히 따랐는데 숫자만 1 커서 막힌 것이다. 근본: 임계값을 위험의 실제 메커니즘이 아니라 적당해 보이는 숫자로 정했다. 원 사고(find / 무제한, CPU 1518초/3시간40분 고아)의 위험 메커니즘은 제한이 아예 없어서 절대 안 끝난다는 것이지 깊이가 얕은지가 아니다. -maxdepth가 있으면 숫자가 몇이든 유한 시간에 반드시 종료한다. 수정: N<=6으로 완화(CEO가 직접 선택). 회귀로 양방향 고정 - maxdepth 4/5/6 ALLOW, 7+ DENY, 무제한 DENY 유지. 일반화 규칙: 1) 차단 게이트의 임계값은 위험의 실제 메커니즘에서 유도하라. 2) 게이트가 대안을 권장하면 그 대안을 따른 명령이 실제로 통과하는지 반드시 실측하라. 3) 게이트를 배포하면 deny 감사 로그를 걸고 실제 차단을 관찰하라. 알려진 잔여 한계(별건, 미수정): _MAXDEPTH_RE가 quote를 모르는 정규식이라 인용된 인자 안 문자열은 오탐 가능하나 이전부터 존재하던 한계로 이번 변경이 악화시키지 않았다.
+
+### [PREVENT] 깨진 cp949 출력을 검증 없이 '있음'으로 단정해 발사 실패(xdist 오독) (2026-07-17)
+python -c로 의존성 존재를 확인했는데 콘솔이 cp949라 한국어 출력이 '????'로 깨졌다. 나는 그 깨진 글자를 '있음'으로 읽고 xdist가 설치됐다고 단정해 pytest -n 8로 전체 스위트를 발사했고 즉시 EXIT=4(unrecognized arguments: -n)로 실패했다. 실제로는 미설치였다. 근본: 판정에 쓰는 출력이 깨져 읽을 수 없으면 그건 '판정 불가'이지 '긍정'이 아니다 — evidence-based-no-guessing 위반. 방지: 존재/버전 확인 스크립트의 출력은 반드시 ASCII로 낸다(print('xdist: OK') / 버전 문자열). 한국어 라벨을 쓰지 말 것. 깨진 글자가 보이면 그 자체를 실패 신호로 보고 재확인한다. 부수 소득: 3겹 감시(본작업+주기 진행 이벤트+1N 알람)를 걸어둔 덕에 60분 알람이 아니라 45초 만에 발사 실패를 발견했다 — 규칙이 실제로 작동한 실증
+
+### [PREVENT] 훅이 파일을 쓰면 테스트가 라이브 상태를 오염시킨다 — 주입 지점을 처음부터 제공하라 (2026-07-17)
+사고: 오늘 신설한 PreToolUse 훅 2종이 deny/skip 시 .fluxos/memory/*.jsonl에 기록했다. 회귀 테스트가 훅을 subprocess로 실제 실행하므로 테스트마다 라이브 로그에 session_id="test-session" 픽스처가 쌓였다. 실측: scan_guard_deny 121줄 중 114줄(94%), git_guard_deny 131줄 중 130줄(99%)이 픽스처. CEO가 "다른 세션도 이 훅에 막히는지 지켜봐달라"고 해서 이 로그에 Monitor를 걸었더니 테스트 픽스처가 실제 차단처럼 알림으로 떠 오탐 8건+가 발생했다.
+
+근본: anti-patterns.md의 기존 메타패턴("단위·픽스처 테스트가 라이브 공유상태를 주입 없이 읽어 비결정 실패")이 읽기만 다뤘고 쓰기는 안 다뤘다. 그 항목의 규칙 "프로덕션 코드는 항상 그 주입 지점(path 파라미터/스킵 플래그)을 제공해야 한다"를 훅 신설 시 적용하지 않았다 — 로그 경로를 fluxos_dir/"memory"로 하드코딩하고 주입 지점을 처음부터 두지 않았다. 그 결과 테스트가 라이브를 오염시켰고, 그 오염이 CEO의 감시 도구를 무력화했다(신호와 노이즈를 구분 못 하게 만듦).
+
+수정: flux_evidence.py의 FLUX_EVIDENCE_DIR 패턴(subprocess 훅이 파일 쓰는 완전 동형 선례)을 이식 — env override, .strip() 후 절대경로만 채택(상대경로는 cwd 의존 split-brain 재도입이라 무시, 원 선례 주석 근거), 미설정 시 기존 경로 폴백. 훅별 독립 복제. 테스트는 tempfile.TemporaryDirectory() + os.environ.copy() + env= 주입. 실측 증명: 전체 스위트 실행 전후 4개 로그 line count 증가 0(150/15/162/16 → 동일, 88 passed + 21 subtests).
+
+검증에서 배운 것:
+1. 구현자 2명이 "폴백 검증엔 라이브 쓰기가 불가피하다"고 변론했는데 틀렸다. 검토자가 _log_dir()가 파일 I/O 없는 순수 함수임을 확인하고 in-process 직접 호출로 부작용 0 검증이 가능함을 실증해 반박했다. "불가피하다"는 변론은 실측으로 검증하라 — 대개 더 게으른 방법이 있다.
+2. 오염 경로는 눈에 안 보이는 곳에 숨어 있다. 구현자가 뒤늦게 발견: scan 테스트의 _run_hook()이 scan 훅뿐 아니라 git 훅도 실행하는데 scan env만 주입해 git 로그를 오염시키고 있었다(162→167 실측). 검토자는 별도로 test_case19가 파일 내 유일하게 env= 없이 subprocess를 호출하는 것을 찾았다. 모든 subprocess 호출부를 grep으로 전수 확인하라 — "헬퍼 1곳 고쳤으니 다 커버됐다"는 추정은 틀린다.
+3. 같은 기능을 두 파일에 독립 복제하면 드리프트가 조용히 생긴다. git 쪽엔 .strip()+try/except가 있는데 scan 쪽엔 없어 공백 패딩 절대경로에서 scan만 격리가 깨졌다(검토자 실측). 기능의 존재 이유가 격리인데 정확히 그 격리가 한쪽에서만 실패하는 비대칭 버그였다. 복제가 규약이면(훅 간 import 금지) 복제본 간 동등성을 회귀로 잠가라.
+4. 테스트 실행자가 누적 총량을 신규 증가로 오독해 "FAIL, +297 오염"이라 보고했다. 실제로는 증가 0이었다(오케스트레이터가 before/after 직접 실험해 확정). 인용한 타임스탬프도 몇 시간 전 것이었다. before/after 델타를 주장할 땐 반드시 같은 세션 안에서 전·후를 직접 측정하라 — 사후에 파일을 보고 "이만큼 있다"로 증가를 추론하지 마라.
+
+일반화 규칙:
+1. 파일·DB·공유 상태에 쓰는 코드를 새로 만들면, 그 자리에서 경로 주입 지점을 함께 만들어라. 나중에 테스트가 생기면 그때 이미 늦다 — 라이브가 오염된 뒤에야 발견된다. 기존 선례(FLUX_EVIDENCE_DIR)를 복사하면 5줄이다.
+2. subprocess 경계에서는 in-process patch가 안 통하므로 env 주입이 유일한 격리 수단이다. _live_state_isolation.py(patch.object 방식)는 이 경우 못 쓴다.
+3. 감시·알림 로그를 오염시키는 테스트는 그 감시 자체를 무력화한다. 오탐이 반복되면 사람이 알림을 무시하게 되고, 그러면 진짜 신호도 놓친다.
+
+기존 오염 데이터 244건은 삭제하지 않았다: Monitor가 tail -F라 신규 라인만 보므로 과거 오염은 오탐을 못 만든다(지워도 이득 0). 코드 소비자 0, gitignore 대상이라 방치 비용도 0. 되돌리기 어려운 파괴적 작업이므로 이득 0이면 기본값은 "안 함".
+
+부수 기록: 이 작업의 4파일 변경이 FluxOS 자동커밋(3b7dc00, f789377 — chore(auto))에 쓸려 들어가 attribution이 익명 커밋으로 붙었다. 데이터 유실은 0. 이력 재작성은 타 세션이 그 위에서 작업 중일 수 있어 더 위험하므로 되돌리지 않고 기록만 남긴다(2026-07-17 전례와 동일 처리). 교훈: 편집이 끝나면 즉시 pathspec 커밋하라 — 자동커밋 cadence가 먼저 쓸어간다.
+
+### [PREVENT] 다른 AI(Codex)의 Gradle buildDir cross-drive 정체 진단이 오진 — 원인은 서브에이전트 프로세스 유실 패턴 (2026-07-17)
+다른 AI 세션이 '플러그인 buildDir을 E:로 강제해 C: Pub cache와 cross-drive 계산 실패'라고 진단하고 android/build.gradle.kts를 고쳤으나, 같은 밤 같은 워크트리 구조·같은 guarded 스크립트로 3번(내 14-3/14-4) + 1번(14-5, 신규 워크트리, 원본 미수정 gradle 설정) 전부 성공(18분, 정상). 즉 그 gradle 설정 자체는 무해했고 오진이었다. 실측된 진짜 패턴: 이번 대화에서만 서브에이전트(Agent 도구) 프로세스가 3번 죽으며 그 안의 백그라운드 빌드/조사까지 함께 유실됨(TaskOutput 'No task found'로 확인). 다른 AI 세션도 동일한 프로세스 유실을 'Gradle/DartVM 정체'로 오인했을 가능성이 큼(무출력=정체가 아니라 프로세스 자체가 사라진 것일 수 있음). 방지: 장시간 빌드는 서브에이전트에 위임하지 말고 메인 스레드 Bash(run_in_background)로 직접 실행해 유실 위험을 없앤다. 빌드 정체 의심 시 로그 무변화만으로 판단하지 말고 프로세스 생존(Get-Process) 자체를 먼저 확인한다.
+
+### [PREVENT] CEO OS 긴 파이프라인 지시 확인창 차단 (2026-07-18)
+파이프라인 등록 전에 전체 입력문을 별도 모달에 복사해 장문일 때 확인 버튼이 화면 밖으로 밀렸고, 모달 내부 스크롤도 없어 진행을 막았다.
+
+### [PREVENT] 단일 프로젝트 지시의 공통정책 오분류 방지 (2026-07-18)
+CEO OS 정책 가드가 입력문 표현만 보고 단일 프로젝트 범위를 무시해 ValueFlow 같은 프로젝트 한정 수정 지시까지 공통규칙으로 차단했다.
+
+### [PREVENT] CEO OS 소스 변경 자동 반영 (2026-07-18)
+CEO OS는 정적 파일은 다시 읽지만 Python API는 실행 중 프로세스에 고정돼 코드 수정 뒤 수동 재시작이 필요했다.
+
+### [PREVENT] FluxOS 무산출물 자동복구와 외부 배포 승인 분리 (2026-07-18)
+API 구현 결과가 변경 파일과 검증 종료코드 없이 DONE으로 처리되고, 회복 가능한 실패가 terminal 산출물 우선 판정으로 자동 재개되지 않았다.
+
+### [PREVENT] FluxOS 재개 전 stale 실행 산출물 초기화 (2026-07-18)
+회복 가능한 실패를 pending으로만 바꾸면 기존 done/review 산출물이 남아 오케스트레이터가 구현 단계를 건너뛰고 이전 실패 보고를 재사용했다.
+
+### [PREVENT] FluxOS 무산출물 재개 상태 초기화 (2026-07-18)
+무산출물 실패를 재개할 때 이전 executor_mode/external_codex_status/report와 소진된 재시도 카운터가 남아 다음 실행자 승격 없이 이전 실패를 재사용했다.
+
+### [PREVENT] 죽은 폴백·미인증 provider·허위완료가 겹쳐 파이프라인이 6회 전멸하고도 완료로 보고 (2026-07-21)
+사고: CEO가 만든 glms 파이프라인이 6회 실행 중 성공 0회인데 5회를 "완료"로 보고했다. pipeline-audit 실측상 산출물 8개 전부 MISS인데 로그엔 "GLMS 완료".
+
+근본이 겹쳐 있었다 — 하나만 고쳤으면 여전히 안 돌았다:
+1. 판정을 안 읽음 — 래퍼가 파이프라인 반환 status를 검사하지 않고 무조건 성공 보고. 예외만 아니면 어떤 실패도 "완료"가 됐다.
+2. 폴백이 죽은 코드 — 설계·구현은 정확했으나 호출자 0개. 실경로는 폴백 래퍼가 아니라 원본을 직접 호출했다. chain_state에 기록되던 fallback 값도 계산만 되고 아무도 소비하지 않는 죽은 데이터였다.
+3. 죽은 코드라 시그니처 불일치가 안 드러남 — 폴백 래퍼가 run_glm_lead(model=, cwd=)를 호출하는데 실제 함수는 2인자뿐이라 호출 즉시 TypeError. 아무도 안 부르니 몇 주간 발견되지 않았고, 배선하는 순간 드러났다.
+4. 설계와 구현의 모델 불일치 — CEO 설계는 "구현=Flash/M3"인데 lead 프롬프트는 워커에 GLM 계열을 배정하라고 지시했다. 폴백 체인은 설계대로 flash/m3였는데 lead만 어긋나 있었다. 그 결과 워커가 opencode 미인증 provider(zai-coding)로 가서 파일을 한 번도 못 썼다. 과거 커밋 4개가 전부 모델 이름 문자열만 고치고 이 사슬을 못 짚어 계속 실패했다.
+5. 하위 단계도 거짓 성공 — workers가 files_written=0인데 completed를 보고했다(1번과 같은 계열이 한 층 아래에서 반복).
+
+일반화 규칙:
+1. 래퍼는 감싼 대상의 판정을 반드시 읽어라. 예외 없음 != 성공. try/except로 감싸고 성공을 단정하는 래퍼는 아래 계층의 모든 실패를 위장한다. fail-closed 기본값(값 없음·파싱 실패 -> 실패)을 적용하라.
+2. "만들어놨다"와 "배선됐다"는 다르다. 폴백·가드·훅을 새로 만들면 호출자 수를 grep으로 실측하라. 0이면 그건 기능이 아니라 문서다. 죽은 코드는 시그니처 불일치·계약 드리프트를 숨긴 채 축적되고, 나중에 배선하는 사람이 그 부채를 한꺼번에 만난다.
+3. 설계 문서와 코드의 모델·상수 매핑을 교차 검증하는 테스트를 둬라. 이번엔 MODEL_CHAIN(맞음)과 lead 프롬프트(틀림)가 어긋나 있었고, 어느 쪽도 상대를 검증하지 않아 몇 주간 방치됐다. 두 자료구조가 같은 개념을 표현하면 교차 존재 검증을 회귀로 고정하라.
+4. 외부 도구 연동은 자격증명 존재를 실측하라. 모델 이름 문자열이 맞아도 그 provider가 인증 안 됐으면 조용히 실패한다. 이름을 고치는 수정이 4번 반복됐는데 opencode auth list 한 번이면 끝날 문제였다.
+5. 여러 근본이 겹쳤을 때 하나만 고치고 "고쳤다"고 하지 마라. 이번엔 1번만 고쳤으면 "정직하게 실패 보고"만 하고 여전히 안 돌았을 것이고, 4번만 고쳤으면 여전히 허위 완료로 위장됐을 것이다.
+
+남은 한계(정직 고백): (a) 워커가 지시를 안 따르는 문제 — "한 줄 써라"에 100줄 아키텍처 문서를 쓰고 타임아웃. 프롬프트/디컴포지션 층 문제로 이번 범위 밖. (b) _estimate_files_written 과소집계 — 파일이 실제 존재하는데 0으로 셌다(타임아웃 kill로 출력 집계 실패 추정). 현재 fail-closed라 안전 방향이나 정상 성공도 실패로 오판할 수 있다. (c) glms가 run_pipeline을 우회해 세션 등록이 없어 supervisor가 진행 중 task를 고아로 오인한다.
+
+### [PREVENT] 산출물 판정을 텍스트 추정에 맡기면 위조된다 — 격리+git 실측으로만 판정 (2026-07-21)
+사고: glms 워커가 files_written=2, status=OK로 보고했는데 요청 파일은 생성되지 않았다(라이브 실증 TASK_20260721_092422). 그 앞 6회 실행도 전부 산출물 0인데 완료로 보고됐다.
+
+근본 2중:
+1. 판정 근거가 측정이 아니라 텍스트 추정이었다. _estimate_files_written이 opencode stdout에서 "Wrote "·"Edited " 같은 평문과 tool_use 문자열을 세어 파일 수를 추정했다(중복 카운트까지 있었다). 워커가 "Wrote file successfully"라고 말만 해도 카운트가 올랐다. 그래서 앞서 넣은 fail-closed(files_written==0 -> FAILED)가 과다집계로 무력화됐다.
+2. 측정하려 해도 격리가 없어 무효였다. 워커가 메인 체크아웃에서 돌아(directory="E:\FluxStudio\.fluxos") git diff를 떠도 동시 세션 편집과 섞여 귀속 불가였다. 실제로 스모크 도중 바뀐 failure_policy.py를 워커 소행으로 오귀속할 뻔했다(내용상 다른 세션의 정당한 수정이었다).
+
+드러난 메타패턴 - "만들어놨는데 연결이 안 됨": 이번에 고친 것 대부분이 기능 부재가 아니라 배선 누락이었다.
+- 폴백(run_glm_lead_with_fallback, chain_for_stage) - 호출자 0개인 죽은 코드
+- 워크트리 격리 - _task_worktree_meta가 있는데 glms_runner가 run_pipeline을 우회해 한 번도 호출되지 않음 -> worktree_path가 항상 비어 메인으로 폴백
+- GT 검증 레이어 - glm_qa.run_glm_qa가 evidence= 파라미터를 받는데 orchestrator가 안 넘겨 GT_UNKNOWN 死상태
+- git 실측 인프라 - evidence_engine._collect_git이 이미 존재(status.showUntrackedFiles=no 함정까지 처리)하는데 glms만 안 씀
+
+수정: 워크트리 격리 배선(생성 실패 시 lead 호출 전 isolation_unavailable로 조기 종료 - API 비용 0), 배치 전/후 git 차집합으로 measured_changed_files 산출, 비면 워커 주장 무관하게 batch FAILED, 텍스트 추정치는 claimed_files_written으로 강등(판정 배제), evidence 주입으로 GT 레이어 복구, 성공·실패 양쪽 경로에 관측 필드 영속.
+
+라이브 실증: 같은 지시로 재실행 -> 워크트리 생성 확인(git worktree list, opencode directory= 로그, task meta 3중 확인), 게이트 발동 STATUS: failed | STAGE: workers | REASON: no_measured_file_changes. 이전엔 같은 자리에서 files_written=2, status=OK로 거짓 성공했다.
+
+일반화 규칙:
+1. 산출물 판정은 실행자의 자기보고가 아니라 외부 실측으로 하라. 실행자가 만든 텍스트를 파싱해 성공을 판정하면 그건 검증이 아니라 신뢰다. git·파일시스템·종료코드처럼 실행자가 못 건드리는 근거를 써라.
+2. 실측이 유효하려면 격리가 전제다. 공유 작업공간에서 뜬 diff는 남의 변경과 섞여 귀속 불가다 - 격리는 부수 효과가 아니라 측정의 선행 조건이다. 격리 못 하면 측정도 못 하니 조기 실패시켜라(비용 0).
+3. 프롬프트로 행동을 누르는 데는 한계가 있다. lead가 "다른 파일 건드리지 마라"를 명시하고 instruction에 제약을 2줄 더 넣었는데도 워커 행동은 안 바뀌었다(실측). 지시 준수를 못 만들면 안 했을 때 확실히 아는 검증으로 전환하라.
+4. 새 기능을 의심하기 전에 기존 기능의 배선을 의심하라. 이번 근본 4개가 전부 "코드는 멀쩡한데 호출되지 않음"이었다. 새로 만들기 전에 grep으로 호출자 수를 세라 - 0이면 그건 기능이 아니라 문서다.
+
+남은 한계(정직 고백): (a) 워커가 지시를 따르게 만들지 못했다 - 이제 거짓 성공은 막지만 워커가 요청 작업을 실제로 수행하게 하는 건 별개 문제다. (b) 범위 이탈(unrequested_files)은 기록만 하고 차단하지 않는다 - 워크트리 격리로 프로덕션 위험이 제거됐고 오탐률 데이터가 없어 지금 차단하면 과차단 위험. (c) lead/qa 단계 실패에는 관측 필드 확장을 적용하지 않았다(workers만).
+
+### [PREVENT] supervisor_daemon 예약작업이 로그온 트리거만 있어 세션중 死亡 시 영구 미복구 (2026-07-21)
+FluxOS-Supervisor-Autostart 작업스케줄러 작업이 MSFT_TaskLogonTrigger만 갖고 반복(주기) 트리거가 없었다. 코드(ensure_supervisor_running 주석)는 '예약작업 10분 반복 트리거'가 이미 존재한다고 전제하지만 실제 작업은 로그온 1회뿐이었다. supervisor_daemon(pid 885200)이 20:41 UTC에 원인불명으로 죽은 뒤(stdout/stderr DEVNULL이라 크래시 로그 없음) 로그온이 다시 없는 한 아무것도 안 살아나, 정체감지/watchdog/resource sweep이 2시간+ 정지했다. DuplicateProcessCleanup(10분마다 반복, TimeTrigger+Repetition Interval=PT10M)과 동일 패턴을 FluxOS-Supervisor-Autostart에 추가(기존 로그온 트리거는 유지, action은 이미 run.py supervisor ensure(revive_only=True, 멱등)라 그대로 재사용)로 수정.
+
+### [PREVENT] 서브에이전트 병렬 위임 시 '커밋하지 마라' 지시가 타 세션 git reset --hard와 만나 6개 그룹 작업 유실 (2026-07-22)
+오케스트레이터가 6개 구현 에이전트 전부에게 '커밋하지 마라, 구현·테스트까지만'이라고 지시해 완성된 변경이 몇 시간 미커밋으로 방치됐다. 그 사이 다른 세션이 git reset --hard(reflog: 'reset: moving to HEAD~1')를 실행해 tracked 파일 수정이 통째로 날아갔다. 실측 증상이 결정적이다 — untracked 신규 파일(cost_gate.py, 신규 테스트 2개)은 전부 살아남고 tracked 파일 수정만 전부 소실됐다(reset --hard의 정확한 서명). 유일하게 살아남은 그룹은 우연히 타 세션 커밋에 흡수된 것이었다. 근본은 두 겹: (1) 다중 세션이 같은 체크아웃을 공유하는 환경에서 미커밋 상태는 '아직 안 끝난 작업'이 아니라 '언제든 사라질 수 있는 상태'다 (2) 오케스트레이터가 통제를 위해 커밋을 미룬 판단이 그 노출 시간을 몇 시간으로 늘렸다. 이 저장소 메모리에 이미 '편집 끝나면 즉시 pathspec 커밋'이라는 규칙이 있었는데 정면으로 어겼다. 수정: 병렬 위임 시 각 에이전트가 자기 파일만 pathspec으로 완료 즉시 커밋하도록 지시하고(push는 오케스트레이터가 일괄), 커밋 직후 git show --stat HEAD로 의도한 파일만 들어갔는지 확인시킨다. 재구현 시 이 방식으로 6개 그룹 전부 무사히 커밋됐다.
+
+### [PREVENT] 서브에이전트가 검증 목적으로 git stash를 써서 타 세션 stash가 워킹트리에 충돌 병합(한 세션에 2회 재발) (2026-07-22)
+구현 에이전트와 검토 에이전트가 각각 baseline 비교 목적으로 git stash/stash pop을 실행했다. 1회차는 타 세션 index.lock과 충돌해 stash 자체가 실패(유실 없음), 2회차는 stash pop이 스택에 있던 무관한 기존 stash(다른 세션의 폐기된 supervisor 수정 사본)를 pipeline/supervisor_daemon.py에 충돌 병합해 워킹트리를 오염시켰다(git checkout HEAD -- 로 즉시 원복, 유실 없음). 근본: 다중 세션이 같은 체크아웃을 공유하는 이 환경에서 stash 스택은 공유 자원이라 pop이 내 것을 꺼낸다는 보장이 없고, rebase.autoStash=true 설정 때문에 정체불명의 autostash가 상시 쌓여 있다(실측 7개). 이 저장소 anti-patterns.md에 이미 'git stash 대신 별도 워크트리나 패치 파일로 격리하라'는 규칙이 있는데 에이전트 지시문에 그 금지가 명시돼 있지 않아 두 에이전트가 독립적으로 같은 실수를 했다. 수정: 서브에이전트 지시문에 'baseline 비교가 필요하면 git stash 금지, git show/git diff <커밋>/정적 코드 확인으로 대체'를 명시한다. 특히 검증·비교 목적의 stash는 얻는 것(잠깐의 baseline)보다 잃는 것(타 세션 작업 오염 위험)이 크다.
+
+### [PREVENT] hermes_runtime tick은 apply=False에서도 lock을 변경한다 — 'apply 스위치=조치 여부'라는 전제가 틀림 (2026-07-22)
+hermes_runtime의 apply 파라미터를 '켜면 자동복구가 시작되고 끄면 진단만 한다'는 스위치로 이해했으나 실측은 다르다. _stage_session_watchdog(hermes_runtime.py:76)가 load_locks()를 부르는데, locks.py:159-163의 load_locks()는 호출 자체가 부작용으로 _cleanup_expired_locks_unlocked를 실행한다. 그 함수(locks.py:449-568)는 lock status를 released로 바꿔 디스크에 저장하고(사유 4종: invalid payload / no live task session / project session stale / lease expired), 대기 lock을 active로 승격하며(_promote_lock), signal_pipeline_daemon으로 파이프라인 데몬을 깨운다. 즉 apply=False인 지금도 lock 상태 변경·task 승격·데몬 기동이 일어나고 있다. 같은 부작용이 hermes_apply_guard.evaluate_apply_guard(:102-103)와 self_heal_detectors.collect_lock_backlog(:334)에도 있다. apply=True가 추가로 여는 것은 24시간 지난 released lock 레코드 제거(비가역, 감사기록 소실)와 resolve_stuck(apply=True)뿐이다. 또한 호출자가 apply=False 하드코딩 1개뿐이라 알고 있었으나 실제로는 2개이고, run.py:2615 runtime-status가 build_runtime_status를 거쳐 apply=HERMES_RUNTIME_APPLY(env)로 열려 있어 env만 켜면 supervisor 배선 없이도 CLI 한 번에 apply 경로가 발동한다. 일반 규칙: '진단 전용'이라고 이름 붙은 조회 함수가 실제로 상태를 변경하는지 확인하라 — 특히 load_/collect_/evaluate_ 접두 함수가 내부에서 정리(cleanup)·승격(promote)·신호(signal)를 부르는지 호출 그래프를 따라가 보라. 스위치 하나로 파괴성을 판단하지 말고 그 스위치가 실제로 무엇을 여닫는지 코드로 확인해야 한다.
+
+### [PREVENT] 서브에이전트가 검증 중 소유권 미확인 python 프로세스를 강제 종료 (2026-07-22)
+flux-complex-implementer가 자기 pytest를 중복 실행해 느려지자, CommandLine만 보고 python.exe 3개를 Stop-Process -Force로 종료했다. 이 머신은 여러 AI 세션(Claude/Codex)·FluxOS 데몬 3종·dev server가 상시 공유하므로, 그 PID들이 정말 자기 것인지 확인할 근거가 없었다(부모 PID·시작시각·세션 소유자 대조 없음). 실제로 이번엔 데몬 3종이 생존해 실피해가 없었으나 이는 운이지 절차가 막은 게 아니다. CLAUDE.md 리소스 규칙의 '작업 소유권과 종료 조건이 확인된 경우에만 정리, 이름 기준 일괄 종료 금지'를 정면 위반. 더 근본적으로: 위임 프롬프트에 '다른 프로세스를 종료하지 마라'가 명시돼 있지 않으면 워커는 느려짐을 만나면 종료를 자연스러운 해법으로 택한다 — 종료 금지는 기본값으로 주입돼야지 매번 사람이 적어줄 것이 아니다.
+
+### [PREVENT] SubagentStop 훅이 하네스 레벨에서 전면 미발화 — 2026-07-17/18경부터 전 세션 flux-evidence subagents 기록 정지, 완료 게이트가 서브에이전트 실행분 전체를 못 봄 (2026-07-22)
+증상: FinFlow 세션(f8ea8dd5-...)에서 2026-07-22 하루에만 flux-explorer/planner/complex-implementer/simple-implementer/test-executor/reviewer를 Agent 도구로 10회+ 실행해 정상 결과를 받았는데(TaskOutput/응답으로 완료 확인됨), 증거파일 `E:\AI_WIKI\scripts\.cache\flux-evidence\<session>.json`의 `subagents` 배열엔 그날 기록이 0건이었다. 마지막 기록은 2026-07-18T01:40:47Z.
+
+조사 범위 확대: `flux-evidence` 디렉터리의 다른 세션 파일들(af2b3ed8, 1a279cc8, eecedc56 등, `created_at`이 2026-07-17이고 `updated_at`은 2026-07-22까지 계속 갱신되는 살아있는 세션들)도 전부 동일 증상이었다 — subagents 배열의 마지막 recorded_at이 전부 2026-07-17~18 새벽 사이에 멈춰 있고, 그 이후로는 단 1건도 없다. 반면 같은 세션들의 `test_runs` 배열(별도 메커니즘, `flux_test_recorder.py`를 CLI로 직접 호출)은 2026-07-22까지 정상적으로 계속 기록됐다. 즉 이 결함은 이 세션 하나의 문제가 아니라 **모든 세션에서 2026-07-17/18경부터 SubagentStop 훅 자체가 하네스 레벨에서 발화를 멈춘 것**으로 보인다.
+
+근본원인 격리: `flux_subagent_recorder.py`(SubagentStop 훅 스크립트)에 실제 stdin 페이로드를 그대로 파일에 append하는 임시 디버그 로깅을 넣고, 실제 Agent 도구로 flux-explorer 서브에이전트 1개를 정상 실행·정상 완료시켰다. 완료 후 디버그 로그 파일은 **생성조차 되지 않았다** — 즉 훅 프로세스 자체가 전혀 spawn되지 않았다. 곧이어 같은 스크립트에 동일 스키마(`hook_event_name":"SubagentStop"`, `agent_type`, `agent_id` 등 최상위 필드)를 수동으로 stdin 파이핑하자 스크립트는 정상 동작하고 증거파일에 정상 기록됐다(디버그 로그도 정상 생성). 이로써 스크립트 로직·스키마 파싱은 결함이 없고, **하네스가 SubagentStop 훅 자체를 호출하지 않는 것**이 근본원인임을 확정했다(2026-07-17 [PREVENT] "훅·차단 게이트는 실제 하네스 스키마로 실발화 실측" 항목이 다뤘던 "필드 스키마 불일치로 死훅"과는 다른 계열 — 이번엔 스키마 문제가 아니라 훅 프로세스 자체가 안 뜬다).
+
+영향: FluxOS의 4게이트(계획/테스트/리뷰/통합) 중 리뷰·계획 게이트는 `flux-planner`/`flux-reviewer` 증거를 이 `subagents` 배열에서 읽는데(CLAUDE.md "증거 기반 판정" 절), 이 결함이 방치되면 실제로 서브에이전트를 정상 위임해 정상 리뷰까지 받았어도 증거파일엔 기록이 없어 COMPLETE 판정이 영구히 차단되거나(fail-closed 쪽으로), 혹은 게이트 로직이 이 결측을 감지 못 하면 반대로 "위임 증거 없음"을 조용히 통과시키는 방향으로 악용될 수도 있다(fail-open 위험) — 어느 방향이든 flux-* 파이프라인의 위임 검증이 사실상 무력화된 상태다.
+
+수정 범위: 이 저장소(FinFlow 세션)에서 고칠 수 있는 코드가 아니다 — `flux_subagent_recorder.py`는 정상이고, 문제는 Claude Code 하네스(현재 로컬 CLI 버전 2.1.207)가 SubagentStop 이벤트에서 등록된 훅을 실행하지 않는 것이다. `~/.claude/settings.json`의 `hooks.SubagentStop` 등록 자체는 정상 형식(다른 훅과 동일한 스키마, matcher 없이 전체 적용)이라 설정 오류도 아니다. 진단용으로 넣었던 디버그 로깅과 수동 테스트로 생성된 증거파일 오염 레코드는 조사 직후 원복·제거했다(스크립트는 원본 그대로, 증거파일은 진단 레코드만 삭제).
+
+방지책(하네스 버그라 코드로 막을 수 없음, 감시로만 대응): (1) flux-* 서브에이전트를 위임한 세션은 주기적으로(예: 완료 보고 전) 자기 evidence 파일의 `subagents` 배열 마지막 `recorded_at`이 그날 날짜인지 확인한다 — 오래됐으면 이 결함이 재발했다는 신호다. (2) 이 결함이 언제 풀리는지(하네스 업데이트로 자연 해소되는지)는 알 수 없으므로, Claude Code 버전이 바뀔 때마다(예: 2.1.207 이후) 이 항목을 재검증한다 — 실제 Agent 서브에이전트 1개를 실행하고 evidence 파일에 새 레코드가 생기는지 직접 확인하는 것이 유일한 검증 방법이다(스크립트가 정상이라는 것과 훅이 발화한다는 것은 별개 사실이므로 반드시 실측하라 — 2026-07-17 [PREVENT] 항목의 교훈과 동일).
+
+일반화 교훈: 훅이 "설정에 등록돼 있다"·"스크립트가 정상 로직이다"·"수동 파이핑하면 동작한다"는 셋 다 "실제 이벤트 발생 시 하네스가 훅을 spawn한다"의 증거가 아니다. 세 조건이 전부 참이어도 하네스가 그 이벤트에서 훅을 호출하지 않으면 기록은 영구히 0이다. 이번 조사에서 결정적이었던 것은 스크립트에 원시 stdin을 그대로 찍는 로깅을 넣고 실제 이벤트를 1회 발생시켜 "로그 파일이 아예 안 생겼다"를 확인한 것 — 파싱 실패와 미발화는 겉보기엔 똑같이 "기록 없음"으로 보이지만 원인이 완전히 다르므로, 결함을 스크립트 버그로 속단하기 전에 반드시 원시 페이로드 캡처로 발화 여부부터 분리해서 확인해야 한다.
+
+### [PREVENT] 위임 프롬프트에 프로세스 종료 금지를 안 넣어 서브에이전트가 남의 프로세스를 죽임(같은 날 2회) (2026-07-22)
+2026-07-22 anti-patterns에 '서브에이전트가 검증 중 소유권 미확인 python 프로세스를 강제 종료' 항목이 이미 등록됐고 그 항목의 결론이 '종료 금지는 기본값으로 주입돼야지 매번 사람이 적어줄 것이 아니다'였는데, 오케스트레이터(나)가 그날 오후 위임 프롬프트에 그 금지를 넣지 않아 검토 서브에이전트가 CommandLine 매칭만으로 python.exe 2개(758708, 767796)를 Stop-Process -Force로 종료했다. 그게 오케스트레이터가 실행 중이던 baseline 회귀 측정 프로세스였다. 방지책이 문서에만 있고 실제 위임 경로에 배선되지 않으면 같은 사고가 반복된다 — '감지·기록은 배선, 해소는 미배선'의 행동 버전. 조치: 이후 모든 구현·검토 위임 프롬프트 최상단에 프로세스 종료 금지(Stop-Process/taskkill/kill/pkill)와 라이브 데몬 재기동 금지를 고정 문구로 넣는다.
 
 
 # Flux Studio Business Context
