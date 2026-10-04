@@ -2,11 +2,38 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-class PriorityCardZone extends ConsumerWidget {
-  const PriorityCardZone({super.key});
+import 'package:nexusflow/providers/home_provider.dart';
+
+class PriorityCardZone extends StatelessWidget {
+  const PriorityCardZone({super.key, required this.summary});
+
+  final AsyncValue<HomeSummary> summary;
+
+  Color _gradeColor(String? grade) {
+    switch (grade) {
+      case 'A':
+        return const Color(0xFF16A34A);
+      case 'B':
+        return const Color(0xFFF59E0B);
+      case 'C':
+      case 'D':
+        return const Color(0xFFDC2626);
+      default:
+        return const Color(0xFF64748B);
+    }
+  }
+
+  String _lastInteractionLabel(Map<String, dynamic> account) {
+    final raw = account['last_interaction_at'];
+    final at = raw == null ? null : DateTime.tryParse(raw.toString());
+    if (at == null) return '기록 없음';
+    final days = DateTime.now().difference(at).inDays;
+    if (days <= 0) return '오늘 기록';
+    return '최근 기록 $days일 전';
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -22,38 +49,51 @@ class PriorityCardZone extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 10),
-        SizedBox(
-          height: 140,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: 5, // TODO: 실제 데이터 연결
-            itemBuilder: (context, index) {
-              return _PriorityCard(
-                name: '박원장',
-                accountName: '원주세브란스',
-                urgencyColor: index == 0
-                    ? const Color(0xFFDC2626)
-                    : index == 1
-                        ? const Color(0xFFF59E0B)
-                        : const Color(0xFF16A34A),
-                healthScore: 72 - (index * 8),
-                reason: 'follow-up ${31 + index}일',
-                accountId: 'account_$index',
-                onTap: (id) => context.push('/accounts/$id'),
-              );
-            },
-          ),
-        ),
+        if (summary.isLoading)
+          const _SkeletonCard()
+        else ..._buildCards(context),
       ],
     );
+  }
+
+  List<Widget> _buildCards(BuildContext context) {
+    final accounts = summary.value?.topAccounts ?? const [];
+    if (accounts.isEmpty) return const [_EmptyCard()];
+
+    return [
+      SizedBox(
+        height: 140,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: accounts.length,
+          itemBuilder: (context, index) {
+            final account = accounts[index];
+            final grade = account['health_grade']?.toString();
+            return _PriorityCard(
+              name: account['name']?.toString() ?? '',
+              gradeLabel:
+                  grade == null || grade.isEmpty ? '등급 없음' : '$grade등급',
+              urgencyColor: _gradeColor(grade),
+              healthScore:
+                  num.tryParse(account['health_score']?.toString() ?? '')
+                          ?.round() ??
+                      0,
+              reason: _lastInteractionLabel(account),
+              accountId: account['id']?.toString() ?? '',
+              onTap: (id) => context.push('/accounts/$id'),
+            );
+          },
+        ),
+      ),
+    ];
   }
 }
 
 class _PriorityCard extends StatelessWidget {
   const _PriorityCard({
     required this.name,
-    required this.accountName,
+    required this.gradeLabel,
     required this.urgencyColor,
     required this.healthScore,
     required this.reason,
@@ -62,7 +102,7 @@ class _PriorityCard extends StatelessWidget {
   });
 
   final String name;
-  final String accountName;
+  final String gradeLabel;
   final Color urgencyColor;
   final int healthScore;
   final String reason;
@@ -118,7 +158,7 @@ class _PriorityCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              accountName,
+              gradeLabel,
               style: const TextStyle(
                 fontSize: 11,
                 color: Color(0xFF64748B),
@@ -133,6 +173,7 @@ class _PriorityCard extends StatelessWidget {
                 color: urgencyColor,
                 fontWeight: FontWeight.w500,
               ),
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 4),
             Row(
@@ -148,6 +189,67 @@ class _PriorityCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  const _EmptyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      height: 140,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      alignment: Alignment.center,
+      child: const Text(
+        '아직 거래처가 없어요',
+        style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+      ),
+    );
+  }
+}
+
+class _SkeletonCard extends StatelessWidget {
+  const _SkeletonCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      height: 140,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _bar(80, 12),
+          const SizedBox(height: 10),
+          _bar(120, 10),
+          const Spacer(),
+          _bar(60, 10),
+        ],
+      ),
+    );
+  }
+
+  Widget _bar(double width, double height) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: const Color(0xFFE2E8F0),
+        borderRadius: BorderRadius.circular(4),
       ),
     );
   }

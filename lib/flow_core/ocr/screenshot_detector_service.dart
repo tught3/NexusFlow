@@ -1,4 +1,3 @@
-class ScreenshotDetectorService {
 // 스크린샷 감지 서비스 - MediaStore 변경 감지 후 관련성 판별
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -89,4 +88,3 @@ final screenshotDetectorProvider =
     Provider<ScreenshotDetectorService>((ref) {
   return ScreenshotDetectorService.instance;
 });
-}

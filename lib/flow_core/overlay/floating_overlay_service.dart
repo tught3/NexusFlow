@@ -1,4 +1,3 @@
-class FloatingOverlayService {
 // 플로팅 오버레이 서비스 - 스크린샷/SMS 감지 시 다른 앱 위에 표시
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -70,5 +69,4 @@ class FloatingOverlayService {
         .receiveBroadcastStream()
         .map((event) => Map<String, dynamic>.from(event as Map));
   }
-}
 }

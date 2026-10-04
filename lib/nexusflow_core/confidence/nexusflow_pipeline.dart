@@ -1,6 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../industry_modes/industry_mode_service.dart';
+import '../relationship/health_score_service.dart';
+import '../insights/insight_engine.dart';
 import 'nexusflow_ai_service.dart';
 import '../../flow_core/voice_input/voice_text_cleanup_service.dart';
 
@@ -35,11 +41,11 @@ class NexusflowPipeline {
     final cleanedText = cleanupResult.cleanedText;
 
     // STEP 3. PII 감지
-    final piiFlags = _detectPii(cleanedText);
+    final piiFlags = detectPii(cleanedText);
 
     // STEP 4. Dictionary 매칭
     final dictionary = await _loadDictionary();
-    final dictionaryBonus = _matchDictionary(cleanedText, dictionary);
+    final dictionaryBonus = matchDictionary(cleanedText, dictionary);
 
     // STEP 5. 기존 거래처/담당자 로드
     final accounts = await _loadAccounts();
@@ -56,13 +62,13 @@ class NexusflowPipeline {
     );
 
     // STEP 7. Dictionary 보너스 적용
-    final boosted = _applyDictionaryBonus(extracted, dictionaryBonus);
+    final boosted = applyDictionaryBonus(extracted, dictionaryBonus);
 
     // STEP 8. 종합 Confidence 계산
-    final overallConfidence = _calculateOverallConfidence(boosted);
+    final overallConfidence = calculateOverallConfidence(boosted);
 
     // STEP 9. Confidence Routing
-    final routingLevel = _route(overallConfidence);
+    final routingLevel = route(overallConfidence);
 
     // STEP 10. AI 추출 결과 저장
     final extractionId = await _saveExtraction(
@@ -73,11 +79,17 @@ class NexusflowPipeline {
     );
 
     // STEP 11. HIGH면 자동 저장, 아니면 검수 대기
+    String? autoSavedAccountId;
     if (routingLevel == ConfidenceLevel.high) {
-      await _autoSave(extracted: boosted, extractionId: extractionId);
+      autoSavedAccountId =
+          await _autoSave(extracted: boosted, extractionId: extractionId);
     } else {
       await _enqueueValidation(extractionId: extractionId);
     }
+
+    // STEP 12. 후처리 (health score + 인사이트) — fire-and-forget
+    // 파이프라인 응답 지연 없이 백그라운드로 실행하며, 실패해도 본 저장에 영향 없다.
+    unawaited(_postProcess(accountId: autoSavedAccountId));
 
     return NexusflowPipelineResult(
       rawSourceId: rawSourceId,
@@ -110,7 +122,10 @@ class NexusflowPipeline {
   }
 
   /// STEP 3. PII 감지
-  Map<String, List<String>> _detectPii(String text) {
+  // static + @visibleForTesting: 인스턴스 생성에 SupabaseClient가 필요해 테스트에서
+  // 만들 수 없으므로 순수 로직을 static으로 노출해 단위테스트 경로로 삼는다.
+  @visibleForTesting
+  static Map<String, List<String>> detectPii(String text) {
     final flags = <String, List<String>>{};
 
     // 전화번호
@@ -149,7 +164,8 @@ class NexusflowPipeline {
   }
 
   /// STEP 4. Dictionary 매칭 (보너스 계산)
-  Map<String, double> _matchDictionary(
+  @visibleForTesting
+  static Map<String, double> matchDictionary(
     String text,
     List<Map<String, dynamic>> dictionary,
   ) {
@@ -186,7 +202,8 @@ class NexusflowPipeline {
   }
 
   /// STEP 7. Dictionary 보너스 적용
-  Map<String, dynamic> _applyDictionaryBonus(
+  @visibleForTesting
+  static Map<String, dynamic> applyDictionaryBonus(
     Map<String, dynamic> extracted,
     Map<String, double> bonuses,
   ) {
@@ -209,7 +226,10 @@ class NexusflowPipeline {
   }
 
   /// STEP 8. 종합 Confidence 계산
-  double _calculateOverallConfidence(Map<String, dynamic> extracted) {
+  /// 기준표: account 2.0 / contact 2.0 / product 1.5 / schedule 1.5 /
+  ///         action_items 1.0 / signals 0.8 (리스트는 항목 confidence 평균에 가중치 적용)
+  @visibleForTesting
+  static double calculateOverallConfidence(Map<String, dynamic> extracted) {
     final weights = {
       'account': 2.0,
       'contact': 2.0,
@@ -229,12 +249,35 @@ class NexusflowPipeline {
       }
     }
 
+    // 리스트형 항목(action_items/signals): confidence를 가진 항목의 평균에 가중치 적용.
+    // confidence를 가진 항목이 없으면(0개 수집) totalWeight에서 제외 — 기존 4종과 일관.
+    final listWeights = {
+      'action_items': 1.0,
+      'signals': 0.8,
+    };
+    for (final entry in listWeights.entries) {
+      final list = extracted[entry.key];
+      if (list is! List) continue;
+      final confidences = list
+          .whereType<Map<String, dynamic>>()
+          .map((item) => item['confidence'])
+          .whereType<num>()
+          .map((n) => n.toDouble())
+          .toList();
+      if (confidences.isEmpty) continue;
+      final avg =
+          confidences.fold(0.0, (a, b) => a + b) / confidences.length;
+      weightedSum += avg * entry.value;
+      totalWeight += entry.value;
+    }
+
     if (totalWeight == 0) return 0.5;
     return (weightedSum / totalWeight).clamp(0.0, 1.0);
   }
 
   /// STEP 9. Confidence Routing
-  ConfidenceLevel _route(double confidence) {
+  @visibleForTesting
+  static ConfidenceLevel route(double confidence) {
     if (confidence >= _highThreshold) return ConfidenceLevel.high;
     if (confidence >= _midThreshold) return ConfidenceLevel.mid;
     return ConfidenceLevel.low;
@@ -279,7 +322,8 @@ class NexusflowPipeline {
   }
 
   /// STEP 11a. HIGH → 자동 저장
-  Future<void> _autoSave({
+  /// 반환값: 저장/upsert된 account id (거래처가 없으면 null)
+  Future<String?> _autoSave({
     required Map<String, dynamic> extracted,
     required String extractionId,
   }) async {
@@ -287,7 +331,8 @@ class NexusflowPipeline {
     final accountData = extracted['account'];
     String? accountId;
     if (accountData is Map<String, dynamic>) {
-      accountId = await _upsertAccount(accountData['name']?.toString() ?? '');
+      final id = await _upsertAccount(accountData['name']?.toString() ?? '');
+      if (id.isNotEmpty) accountId = id;
     }
 
     // 담당자 저장/업데이트
@@ -309,6 +354,12 @@ class NexusflowPipeline {
         'summary': extracted['summary']?.toString() ?? '',
         'raw_source_id': extractionId,
       });
+
+      // last_contacted_at 갱신 — InsightEngine._checkLongNoContact가 이 컬럼으로
+      // 30일 무접촉을 판정하므로, 인터랙션 발생 시점에 반드시 최신화한다.
+      await supabase.schema('nexusflow').from('accounts').update({
+        'last_contacted_at': DateTime.now().toIso8601String(),
+      }).eq('id', accountId).eq('user_id', userId);
     }
 
     // 액션 아이템 저장
@@ -342,6 +393,55 @@ class NexusflowPipeline {
         }
       }
     }
+
+    return accountId;
+  }
+
+  /// STEP 12. 후처리: health score 계산 + 인사이트 생성
+  /// STEP 11에서 만든 accountId로 health를 계산하고, 인사이트는 계정과 무관하게 생성.
+  /// 두 작업은 서로 독립 — 한쪽이 실패해도 다른 쪽은 실행된다.
+  Future<void> _postProcess({String? accountId}) async {
+    final healthService = HealthScoreService(supabase: supabase, userId: userId);
+    final insightEngine = InsightEngine(supabase: supabase, userId: userId);
+    await runPostProcess(
+      accountId: accountId,
+      calculateHealth: (id) async {
+        await healthService.calculate(id);
+      },
+      generateInsights: () async {
+        await insightEngine.generateAll();
+      },
+    );
+  }
+
+  /// 후처리 실행부 (함수 주입 — 단위테스트 가능한 순수 분기/순서 로직)
+  /// 내부에서 모든 예외를 삼켜 debugPrint만 남기므로, 이 메서드는 절대 throw하지 않는다.
+  @visibleForTesting
+  static Future<void> runPostProcess({
+    String? accountId,
+    required Future<void> Function(String accountId) calculateHealth,
+    required Future<void> Function() generateInsights,
+  }) async {
+    await Future.wait([
+      () async {
+        if (accountId == null || accountId.isEmpty) {
+          debugPrint('[NexusflowPipeline] accountId 없음 — health 계산 스킵');
+          return;
+        }
+        try {
+          await calculateHealth(accountId);
+        } catch (e) {
+          debugPrint('[NexusflowPipeline] health score 계산 실패: $e');
+        }
+      }(),
+      () async {
+        try {
+          await generateInsights();
+        } catch (e) {
+          debugPrint('[NexusflowPipeline] 인사이트 생성 실패: $e');
+        }
+      }(),
+    ]);
   }
 
   /// STEP 11b. MID/LOW → 검수 대기열 등록

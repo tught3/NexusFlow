@@ -4,8 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../core/constants.dart';
-import '../core/env.dart';
+const String _authRedirectUrl = 'nexusflow://auth-callback';
 
 enum PlanFlowOAuthProvider {
   google,
@@ -43,7 +42,7 @@ class AuthService {
     final response = await _client.auth.signUp(
       email: email.trim(),
       password: password,
-      emailRedirectTo: AppEnv.authRedirectUrl,
+      emailRedirectTo: _authRedirectUrl,
       data: <String, dynamic>{
         if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
       },
@@ -57,7 +56,7 @@ class AuthService {
   Future<void> sendPasswordResetEmail(String email) {
     return _client.auth.resetPasswordForEmail(
       email.trim(),
-      redirectTo: AppEnv.authRedirectUrl,
+      redirectTo: _authRedirectUrl,
     );
   }
 
@@ -74,7 +73,7 @@ class AuthService {
       supabaseProvider: oauthProvider,
       urlFactory: () => _client.auth.getOAuthSignInUrl(
         provider: oauthProvider,
-        redirectTo: AppEnv.authRedirectUrl,
+        redirectTo: _authRedirectUrl,
       ),
       purpose: 'sign-in',
     );
@@ -91,7 +90,7 @@ class AuthService {
       supabaseProvider: oauthProvider,
       urlFactory: () => _client.auth.getLinkIdentityUrl(
         oauthProvider,
-        redirectTo: AppEnv.authRedirectUrl,
+        redirectTo: _authRedirectUrl,
       ),
       purpose: 'calendar-link',
     );
@@ -170,7 +169,7 @@ class AuthService {
         metadata['user_name'] ??
         metadata['nickname'];
 
-    await _client.schema(DbSchema.shared).from(DbTable.userProfiles).upsert(
+    await _client.schema('shared').from('user_profiles').upsert(
       <String, dynamic>{
         'id': resolvedUser.id,
         'email': resolvedUser.email,

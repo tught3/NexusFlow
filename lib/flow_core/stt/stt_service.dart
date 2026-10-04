@@ -4,9 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
-import '../core/region_settings.dart';
-import 'remote_config_service.dart';
-import 'voice_text_cleanup_service.dart';
+import '../voice_input/voice_text_cleanup_service.dart';
 
 enum SttListenFailure {
   unsupportedLocale,
@@ -50,10 +48,8 @@ class SttService {
   const SttService();
 
   static const String _koreanLocaleId = 'ko_KR';
-  static Duration get _listenFor {
-    final seconds = RemoteConfigService.maxVoiceDurationSeconds;
-    return Duration(seconds: seconds <= 0 ? 60 : seconds);
-  }
+  static const String _preferredLanguageHint = 'ko-KR';
+  static const Duration _listenFor = Duration(seconds: 60);
 
   static const Duration _pauseFor = Duration(seconds: 20);
   static const MethodChannel _nativeSttChannel =
@@ -84,7 +80,7 @@ class SttService {
 
   static String? resolvePreferredLocaleId(Iterable<String> localeIds) {
     final locales = localeIds.toList(growable: false);
-    final preferred = PlanFlowRegionController.instance.region.languageHint;
+    final preferred = _preferredLanguageHint;
     if (locales.contains(preferred)) {
       return preferred;
     }
@@ -252,10 +248,10 @@ class SttService {
     var index = 0;
     while (index < result.length) {
       final normalized = _normalizeTranscriptToken(result[index]);
-      if ((normalized == '?�니' ||
-              normalized == '?�니?? ||
-              normalized == '?�니?? ||
-              normalized == '?�니??) &&
+      if ((normalized == '아니' ||
+              normalized == '아니야' ||
+              normalized == '아니요' ||
+              normalized == '아니다') &&
           index > 0 &&
           index < result.length - 1) {
         final before = result.sublist(0, index);
@@ -490,7 +486,7 @@ class SttService {
 
   static String _transcriptOverlapKey(String token) {
     return _normalizeTranscriptToken(token).replaceFirst(
-      RegExp(r'(?�로|?�서|?�게|?�테|�?????�???가)$'),
+      RegExp(r'(으로|에서|에게|한테|로|에|을|를|이|가)$'),
       '',
     );
   }
@@ -582,7 +578,7 @@ class SttService {
       } catch (_) {}
       _completeActiveFailure(
         failure: SttListenFailure.silence,
-        message: '?�성 ?�력??취소?�어??',
+        message: '음성 입력을 취소했어요.',
       );
       return;
     }
@@ -593,7 +589,7 @@ class SttService {
     await speech.cancel();
     _completeActiveFailure(
       failure: SttListenFailure.silence,
-      message: '?�성 ?�력??취소?�어??',
+      message: '음성 입력을 취소했어요.',
     );
   }
 
@@ -777,7 +773,7 @@ class SttService {
               },
               () => _completeActiveFailure(
                 failure: SttListenFailure.silence,
-                message: '?�성 ?�력??취소?�어??',
+                message: '음성 입력을 취소했어요.',
               ),
             );
             if (didHandle) {
@@ -986,7 +982,7 @@ class SttService {
           _activeRecognizedText = latestRecognizedText;
           _completeActiveFailure(
             failure: SttListenFailure.silence,
-            message: '?�성 ?�력??취소?�어??',
+            message: '음성 입력을 취소했어요.',
           );
         },
       );
@@ -1066,7 +1062,7 @@ class SttService {
         case 'cancelled':
           _completeActiveFailure(
             failure: SttListenFailure.silence,
-            message: '?�성 ?�력??취소?�어??',
+            message: '음성 입력을 취소했어요.',
           );
           break;
         case 'error':
@@ -1141,61 +1137,61 @@ enum SttVoiceCommand {
 }
 
 const String _unsupportedLocaleMessage =
-    '??기기?�서???�디바이???�국???�성 ?�식???�용?????�어?? 직접 ?�력?�로 ?�어가 주세??';
+    '이 기기에서는 온디바이스 한국어 음성 인식을 사용할 수 없어요. 직접 입력으로 이어가 주세요.';
 const String _permissionMessage =
-    '마이??권한???�어?? ?�정?�서 권한???�용?????�시 ?�도?�거??직접 ?�력?�로 ?�어가 주세??';
-const String _silenceMessage = '?�성???�식?��? ?�았?�요. 조금 ???�게 말하거나 직접 ?�력?�로 ?�어가 주세??';
-const String _genericMessage = '?�성 ?�력???�작?��? 못했?�요. 직접 ?�력?�로 ?�어가 주세??';
+    '마이크 권한이 없어요. 설정에서 권한을 허용한 뒤 다시 시도하거나 직접 입력으로 이어가 주세요.';
+const String _silenceMessage = '음성이 인식되지 않았어요. 조금 더 크게 말하거나 직접 입력으로 이어가 주세요.';
+const String _genericMessage = '음성 입력을 시작하지 못했어요. 직접 입력으로 이어가 주세요.';
 
 const Set<String> _timePrefixTokens = <String>{
-  '?�전',
-  '?�후',
-  '?�??,
-  '?�침',
-  '?�심',
-  '�?,
+  '오전',
+  '오후',
+  '저녁',
+  '아침',
+  '점심',
+  '밤',
 };
 
 const Set<String> _undoLastWordCommandTokens = <String>{
-  '?�니',
-  '?�니??,
-  '?�니??,
-  '?�니??,
+  '아니',
+  '아니야',
+  '아니요',
+  '아니다',
 };
 const Set<String> _undoLastSegmentCommandTokens = <String>{
-  '마�?막거지??,
-  '방금거�???,
-  '마�?막삭??,
-  '방금??��',
+  '마지막거지워',
+  '방금거지워',
+  '마지막삭제',
+  '방금삭제',
 };
 const Set<String> _clearAllCommandTokens = <String>{
-  '?�시',
-  '처음부??,
-  '?�시말할�?,
-  '?�체??��',
-  '?�체취소',
+  '다시',
+  '처음부터',
+  '다시말할게',
+  '전체삭제',
+  '전체취소',
 };
 const Set<String> _stopCommandTokens = <String>{
   '취소',
-  '취소??,
-  '취소?�줘',
-  '취소?�주?�요',
+  '취소해',
+  '취소해줘',
+  '취소해주세요',
   '그만',
-  '그만??,
-  '그만?�줘',
-  '그만?�주?�요',
+  '그만해',
+  '그만해줘',
+  '그만해주세요',
   '중단',
-  '중단??,
-  '중단?�줘',
-  '중단?�주?�요',
-  '중�?',
-  '중�???,
-  '중�??�줘',
-  '중�??�주?�요',
-  '?��?',
-  '?��???,
-  '?��??�줘',
-  '?��??�주?�요',
+  '중단해',
+  '중단해줘',
+  '중단해주세요',
+  '중지',
+  '중지해',
+  '중지해줘',
+  '중지해주세요',
+  '정지',
+  '정지해',
+  '정지해줘',
+  '정지해주세요',
 };
 
 class _VoiceCommandMatch {

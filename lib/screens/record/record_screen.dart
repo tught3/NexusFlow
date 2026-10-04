@@ -1,4 +1,8 @@
 // 기록 화면 - 음성/텍스트/파일 입력 + 파이프라인 연결
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,39 +20,91 @@ class RecordScreen extends ConsumerStatefulWidget {
 }
 
 class _RecordScreenState extends ConsumerState<RecordScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late TabController _tabController;
   final _textController = TextEditingController();
   bool _isRecording = false;
   bool _isProcessing = false;
   String _recordedText = '';
+  String _partialText = '';
+  bool _userRequestedStop = false;
+  late final SttService _stt = SttService();
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseScale;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _pulseScale = Tween<double>(begin: 1.0, end: 1.08).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _textController.dispose();
+    _pulseController.dispose();
     super.dispose();
   }
 
   Future<void> _startRecording() async {
+    if (_isRecording) return;
     setState(() {
       _isRecording = true;
       _recordedText = '';
+      _partialText = '';
+      _userRequestedStop = false;
     });
-    // TODO: STT 서비스 연결
+    _pulseController.repeat(reverse: true);
+
+    final result = await _stt.listen(
+      onPartialResult: (text) {
+        if (!mounted) return;
+        setState(() => _partialText = text);
+      },
+    );
+
+    if (!mounted) return;
+    _pulseController.stop();
+    setState(() {
+      _isRecording = false;
+      _partialText = '';
+    });
+
+    if (result.isSuccess) {
+      final text = result.text!;
+      _recordedText = text;
+      // PlanFlow UX 관례: 성공 시 버튼 재탭 없이 파이프라인으로 바로 이어감.
+      await _processInput(text, NexusflowInputSource.voice_memo);
+      return;
+    }
+
+    final failure = result.failure;
+    if (failure == null) return;
+    // 사용자가 직접 중단했는데 입력이 없으면 조용히 종료.
+    if (failure == SttListenFailure.silence && _userRequestedStop) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(sttFailureMessage(failure, result.message ?? '')),
+      ),
+    );
   }
 
   Future<void> _stopRecording() async {
+    _userRequestedStop = true;
     setState(() => _isRecording = false);
-    if (_recordedText.isNotEmpty) {
-      await _processInput(_recordedText, NexusflowInputSource.voice_memo);
-    }
+    // 진행 중 listen() Future를 완료시켜 _startRecording의 후속 흐름이 정리되게 한다.
+    // processInput은 listen 완료 쪽에서만 실행되므로 여기서 중복 실행하지 않는다.
+    await _stt.stopActiveListen();
   }
 
   Future<void> _processInput(
@@ -133,6 +189,8 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
                 _VoiceTab(
                   isRecording: _isRecording,
                   recordedText: _recordedText,
+                  partialText: _partialText,
+                  pulseScale: _pulseScale,
                   onStart: _startRecording,
                   onStop: _stopRecording,
                 ),
@@ -143,7 +201,12 @@ class _RecordScreenState extends ConsumerState<RecordScreen>
                     NexusflowInputSource.manual,
                   ),
                 ),
-                const _FileTab(),
+                _FileTab(
+                  onFileText: (text) => _processInput(
+                    text,
+                    NexusflowInputSource.file_upload,
+                  ),
+                ),
               ],
             ),
     );
@@ -155,12 +218,16 @@ class _VoiceTab extends StatelessWidget {
   const _VoiceTab({
     required this.isRecording,
     required this.recordedText,
+    required this.partialText,
+    required this.pulseScale,
     required this.onStart,
     required this.onStop,
   });
 
   final bool isRecording;
   final String recordedText;
+  final String partialText;
+  final Animation<double> pulseScale;
   final VoidCallback onStart;
   final VoidCallback onStop;
 
@@ -170,9 +237,13 @@ class _VoiceTab extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          GestureDetector(
-            onTap: isRecording ? onStop : onStart,
-            child: AnimatedContainer(
+          ScaleTransition(
+            scale: isRecording
+                ? pulseScale
+                : const AlwaysStoppedAnimation<double>(1.0),
+            child: GestureDetector(
+              onTap: isRecording ? onStop : onStart,
+              child: AnimatedContainer(
               duration: const Duration(milliseconds: 300),
               width: isRecording ? 100 : 80,
               height: isRecording ? 100 : 80,
@@ -199,6 +270,7 @@ class _VoiceTab extends StatelessWidget {
               ),
             ),
           ),
+        ),
           const SizedBox(height: 24),
           Text(
             isRecording ? '녹음 중... 탭하면 중지' : '탭하면 녹음 시작',
@@ -207,6 +279,29 @@ class _VoiceTab extends StatelessWidget {
               color: Color(0xFF64748B),
             ),
           ),
+          if (isRecording) ...[
+            const SizedBox(height: 12),
+            const Text(
+              '🎤 듣고 있어요...',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF2563EB),
+              ),
+            ),
+            if (partialText.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  partialText,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF64748B),
+                  ),
+                ),
+              ),
+          ],
           if (recordedText.isNotEmpty) ...[
             const SizedBox(height: 24),
             Container(
@@ -305,9 +400,71 @@ class _TextTab extends StatelessWidget {
   }
 }
 
-// 파일 탭
-class _FileTab extends StatelessWidget {
-  const _FileTab({super.key});
+// 파일 탭 — file_picker로 TXT/MD/CSV를 받아 파이프라인에 file_upload로 넘긴다
+class _FileTab extends StatefulWidget {
+  const _FileTab({required this.onFileText});
+
+  final Future<void> Function(String text) onFileText;
+
+  @override
+  State<_FileTab> createState() => _FileTabState();
+}
+
+class _FileTabState extends State<_FileTab> {
+  static const int _maxBytes = 10 * 1024; // 10KB 초과 시 앞부분만 사용
+  bool _isReading = false;
+
+  // FilePicker 접근은 이 이벤트 핸들러 내부에서만 (테스트 크래시 방지)
+  Future<void> _pickAndProcess() async {
+    if (_isReading) return;
+    setState(() => _isReading = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['txt', 'md', 'csv'],
+      );
+      if (!mounted) return;
+      if (result == null || result.files.isEmpty) return; // 사용자 취소
+
+      final path = result.files.single.path;
+      if (path == null || path.isEmpty) {
+        _showReadError();
+        return;
+      }
+
+      final text = await _readFileText(File(path));
+      if (!mounted) return;
+      if (text.trim().isEmpty) {
+        _showReadError();
+        return;
+      }
+
+      await widget.onFileText(text);
+    } catch (_) {
+      if (mounted) _showReadError();
+    } finally {
+      if (mounted) setState(() => _isReading = false);
+    }
+  }
+
+  /// 10KB 이하면 전체, 초과면 앞 10KB만 읽음 (UTF-8 멀티바이트 잘림 허용).
+  Future<String> _readFileText(File file) async {
+    final length = await file.length();
+    if (length <= _maxBytes) return file.readAsString();
+    final raf = await file.open();
+    try {
+      final bytes = await raf.read(_maxBytes);
+      return utf8.decode(bytes, allowMalformed: true);
+    } finally {
+      await raf.close();
+    }
+  }
+
+  void _showReadError() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('파일을 읽지 못했어요')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -322,7 +479,7 @@ class _FileTab extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const Text(
-            'TXT, CSV, Excel 파일을 업로드하세요',
+            'TXT, MD, CSV 파일을 업로드하세요',
             style: TextStyle(
               fontSize: 15,
               color: Color(0xFF64748B),
@@ -330,11 +487,15 @@ class _FileTab extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            onPressed: () {
-              // TODO: file_picker 연결
-            },
-            icon: const Icon(Icons.attach_file),
-            label: const Text('파일 선택'),
+            onPressed: _isReading ? null : _pickAndProcess,
+            icon: _isReading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.attach_file),
+            label: Text(_isReading ? '읽는 중...' : '파일 선택'),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF2563EB),
               foregroundColor: Colors.white,
@@ -355,3 +516,18 @@ class _FileTab extends StatelessWidget {
 
 // ConfidenceLevel 별칭 (nexusflow_pipeline.dart의 enum과 충돌 방지)
 typedef ConfidenceLevel2 = ConfidenceLevel;
+
+/// STT 실패 유형별 사용자 안내 메시지 (유닛 테스트 가능하도록 최상위 함수).
+/// silence는 서비스가 제공한 message(fallback)를 그대로 사용.
+String sttFailureMessage(SttListenFailure failure, String fallback) {
+  switch (failure) {
+    case SttListenFailure.permissionDenied:
+      return '마이크 권한이 필요해요';
+    case SttListenFailure.silence:
+      return fallback.isNotEmpty ? fallback : '입력이 인식되지 않았어요. 다시 말씀해 주세요.';
+    case SttListenFailure.unavailable:
+      return '음성 인식을 사용할 수 없는 환경이에요';
+    case SttListenFailure.unsupportedLocale:
+      return '이 기기에서는 한국어 음성 인식을 지원하지 않아요';
+  }
+}

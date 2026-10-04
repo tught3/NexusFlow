@@ -117,14 +117,62 @@ class IndustryModeService {
       final count = (existing['confidence_count'] as int? ?? 0) + 1;
       final newScope = count >= 3 ? 'user' : 'learned';
 
+      final updates = <String, dynamic>{
+        'confidence_count': count,
+        'dict_scope': newScope,
+      };
+      // 3회 승격 시점에만 기록 — 이후 카운트에서 promoted_from을 null로 되돌리지 않는다.
+      if (count == 3) updates['promoted_from'] = 'learned';
+
       await supabase
           .schema('nexusflow')
           .from('term_dictionary')
-          .update({
-            'confidence_count': count,
-            'dict_scope': newScope,
-            'promoted_from': count == 3 ? 'learned' : null,
-          })
+          .update(updates)
+          .eq('id', existing['id']);
+
+      // 동일 패턴 5회 → shared_learning_patterns 영구 등록
+      if (count >= 5) {
+        await _registerSharedPattern(
+          term: term,
+          meaning: meaning,
+          mode: mode,
+          confirmedCount: count,
+        );
+      }
+    }
+  }
+
+  /// 5회 이상 확정된 패턴을 공유 학습 패턴으로 영구 등록 (중복 방지: user+term)
+  Future<void> _registerSharedPattern({
+    required String term,
+    required String meaning,
+    required String mode,
+    required int confirmedCount,
+  }) async {
+    final existing = await supabase
+        .schema('nexusflow')
+        .from('shared_learning_patterns')
+        .select('id, confirmed_count')
+        .eq('user_id', userId)
+        .eq('term', term)
+        .maybeSingle();
+
+    if (existing == null) {
+      await supabase
+          .schema('nexusflow')
+          .from('shared_learning_patterns')
+          .insert({
+        'user_id': userId,
+        'industry_mode': mode,
+        'term': term,
+        'meaning': meaning,
+        'confirmed_count': confirmedCount,
+      });
+    } else if ((existing['confirmed_count'] as int? ?? 0) < confirmedCount) {
+      await supabase
+          .schema('nexusflow')
+          .from('shared_learning_patterns')
+          .update({'confirmed_count': confirmedCount})
           .eq('id', existing['id']);
     }
   }

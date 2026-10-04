@@ -1,4 +1,3 @@
-class SmsDetectorService {
 // SMS 자동 감지 서비스 - 거래처 번호 매칭 후 파이프라인 연결
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -88,4 +87,3 @@ class SmsDetectedEvent {
 final smsDetectorProvider = Provider<SmsDetectorService>((ref) {
   return SmsDetectorService.instance;
 });
-}

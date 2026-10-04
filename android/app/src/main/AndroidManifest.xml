@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- release 빌드에서 네트워크 접근에 필수 (debug/profile 매니페스트에만 있어 main에는 누락돼 있었다) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
@@ -9,6 +11,11 @@
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Android 13+ (API 33+) 런타임 알림 권한 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Android 13+ 스크린샷 감지용 미디어 접근 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+
 
     <application
         android:label="NexusFlow"
@@ -36,7 +43,24 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- OAuth 딥링크: nexusflow://auth-callback -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="nexusflow" android:host="auth-callback"/>
+            </intent-filter>
         </activity>
+        <!-- 카카오톡 알림 감지 서비스 (Notification Listener).
+             SMS receiver는 Android 13+ 정책상 동적 등록만 사용하므로 manifest에 등록하지 않는다. -->
+        <service
+            android:name=".NexusflowNotificationListener"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

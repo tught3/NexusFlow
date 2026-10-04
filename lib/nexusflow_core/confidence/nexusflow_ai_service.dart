@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../../flow_core/supabase_client/gpt_service.dart';
 import '../../flow_core/voice_input/voice_text_cleanup_service.dart';
 
 class NexusflowAiService {

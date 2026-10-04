@@ -24,7 +24,7 @@ class VoiceTextCleanupCandidate {
 
   String get searchableText => [title, location ?? '']
       .join(' ')
-      .replaceAll(RegExp(r'[^0-9a-zA-Z가-??s]'), ' ')
+      .replaceAll(RegExp(r'[^0-9a-zA-Z가-힣\s]'), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
 }
@@ -99,11 +99,11 @@ class VoiceTextCleanupService {
     if (normalized.isEmpty) {
       return false;
     }
-    if (RegExp(r'([가-??-9a-zA-Z]{2,})\s*(?�서|??\s+([가-??-9a-zA-Z]{2,})\s*(?�서|??')
+    if (RegExp(r'([가-힣0-9a-zA-Z]{2,})\s*(에서|에)\s+([가-힣0-9a-zA-Z]{2,})\s*(에서|에)')
         .hasMatch(normalized)) {
       return true;
     }
-    if (RegExp(r'([가-??{2,})\s+\1').hasMatch(normalized)) {
+    if (RegExp(r'([가-힣]{2,})\s+\1').hasMatch(normalized)) {
       return true;
     }
     return false;
@@ -119,7 +119,7 @@ class VoiceTextCleanupService {
   static String normalizeForSearch(String text) {
     return normalizeBasic(text)
         .toLowerCase()
-        .replaceAll(RegExp(r'[^0-9a-z가-??s]'), ' ')
+        .replaceAll(RegExp(r'[^0-9a-z가-힣\s]'), ' ')
         .split(RegExp(r'\s+'))
         .map(_stripKoreanParticles)
         .where((token) => token.isNotEmpty)
@@ -143,7 +143,7 @@ class VoiceTextCleanupService {
 
     return text.replaceAllMapped(
       RegExp(
-        r'([가-??-9a-zA-Z]{2,})\s*(?�서|??\s+([가-??-9a-zA-Z]{2,})\s*(?�서|??',
+        r'([가-힣0-9a-zA-Z]{2,})\s*(에서|에)\s+([가-힣0-9a-zA-Z]{2,})\s*(에서|에)',
       ),
       (match) {
         final first = match.group(1) ?? '';
@@ -161,23 +161,23 @@ class VoiceTextCleanupService {
   static String _stripKoreanParticles(String token) {
     var value = token.toLowerCase().trim();
     for (final suffix in const <String>[
-      '?�서',
-      '?�로',
-      '부??,
-      '까�?',
-      '?�게',
-      '?�테',
-      '�?,
-      '??,
-      '??,
-      '�?,
-      '?�',
-      '??,
-      '??,
+      '에서',
+      '으로',
+      '부터',
+      '까지',
+      '에게',
+      '한테',
+      '로',
+      '에',
+      '을',
+      '를',
+      '은',
+      '는',
+      '이',
       '가',
-      '?�',
-      '�?,
-      '??,
+      '와',
+      '과',
+      '도',
     ]) {
       if (value.length > suffix.length + 1 && value.endsWith(suffix)) {
         value = value.substring(0, value.length - suffix.length);

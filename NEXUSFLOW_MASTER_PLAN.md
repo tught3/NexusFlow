@@ -217,54 +217,51 @@ services/                 감지 서비스
 
 ### 핵심 기능
 - [x] 음성 입력 → AI 파이프라인 → 저장
-- [x] 스크린샷 감지 → OCR → 플로팅 오버레이
-- [x] SMS 자동 감지 → 파이프라인
-- [x] 카카오톡 알림 감지 → 파이프라인
-- [x] 통화 녹음 감지 → STT → 파이프라인
-- [ ] Confidence Routing (HIGH 자동저장 / MID 플로팅 / LOW 검수)
-- [ ] Dictionary 학습 (3회 확인 → 자동 승격)
+- [x] 스크린샷 감지 → OCR → 플로팅 오버레이 (Dart 파이프라인 구현, 네이티브 핸들러는 2차 과제)
+- [x] SMS 자동 감지 → 파이프라인 (Dart 뼈대, 네이티브 핸들러는 2차 과제)
+- [x] 카카오톡 알림 감지 → 파이프라인 (Dart 뼈대, 네이티브 핸들러는 2차 과제)
+- [x] 통화 녹음 감지 → STT → 파이프라인 (Dart 뼈대, 네이티브 핸들러는 2차 과제)
+- [x] Confidence Routing (HIGH 자동저장 / MID 확인 / LOW 검수) — 2026-10-04 가중치 보완(액션아이템/신호 반영) + 단위테스트
+- [x] Dictionary 학습 (3회 확인 → 자동 승격, 5회 → shared_learning_patterns 영구 등록)
 
 ### 화면
-- [x] 홈 화면 (4존 레이아웃)
-- [ ] 거래처 목록 화면
-- [ ] 거래처 상세 화면 (Health Score + 타임라인)
-- [ ] 담당자 상세 화면
-- [x] 기록 화면 (음성/텍스트/파일)
+- [x] 홈 화면 (4존 레이아웃, 실데이터 연동 — PlanFlow 일정 존은 연동 준비 중 표시)
+- [x] 거래처 목록 화면
+- [x] 거래처 상세 화면 (Health Score + 타임라인)
+- [x] 담당자 상세 화면
+- [x] 기록 화면 (음성 STT 연결/텍스트/파일 file_picker 연결)
 - [x] 확인 모달 (MID Confidence)
 - [x] 검수 화면 (LOW Confidence)
-- [ ] 인사이트 목록/상세
-- [ ] 설정 화면
-- [ ] 온보딩 (동의 → 모드선택 → 데이터가져오기)
-- [ ] 로그인 화면
+- [x] 인사이트 목록/상세 (InsightEngine 연결, 스와이프 dismiss, 피드백)
+- [x] 설정 화면 (업종 모드/감지 on/off/계정/온보딩 재진입) + 권한 화면
+- [x] 온보딩 (동의 → 모드선택 → 데이터가져오기는 '준비 중' 상태)
+- [x] 로그인 화면 (이메일/비밀번호 + OAuth 버튼)
 
 ### 공통 컴포넌트
 - [x] NexusflowFab (글로벌 FAB)
 - [x] 플로팅 오버레이
 - [x] Confidence 배지
 - [x] Health Score 위젯
+- [x] 타임라인/기억/가용시간 위젯 + IndustryTag (2026-10-04)
 
 ### Flow Core
-- [x] nexusflow_ai_service.dart
-- [x] nexusflow_pipeline.dart
-- [x] floating_overlay_service.dart
-- [x] ocr_service.dart
-- [x] screenshot_detector_service.dart
-- [x] sms_detector_service.dart
-- [x] kakao_detector_service.dart
-- [x] call_detector_service.dart
-- [x] health_score_service.dart
-- [x] insight_engine.dart
-- [x] secure_vault_service.dart
-- [x] supabase_config.dart
-- [x] industry_mode_service.dart
+- [x] nexusflow_ai_service.dart / nexusflow_pipeline.dart (2026-10-04 빌드 브레이커 수리 완료)
+- [x] stt_service.dart / voice_text_cleanup_service.dart (mojibake 복원, import 수리)
+- [x] auth_service.dart (broken import 수리, redirect 상수화)
+- [x] 감지 서비스 MethodChannel 네이티브 구현 (2026-10-04: MainActivity + SMS/Kakao/Call/Screenshot/Overlay 매니저, Kotlin 컴파일은 실기기 빌드에서 최초 검증 필요)
+- [x] 감지 오케스트레이터 (플래그→감지 start/stop→이벤트→OCR→파이프라인→오버레이)
+- [x] health_score_service.dart / insight_engine.dart / secure_vault_service.dart / supabase_config.dart / industry_mode_service.dart
+
+### 파이프라인 후처리
+- [x] 저장 후 Health Score 자동 계산 + 인사이트 자동 생성 (2026-10-04, unawaited fire-and-forget)
 
 ### 인프라
 - [x] Supabase nexusflow schema (19개 테이블)
 - [x] confidence_thresholds 테이블
 - [x] term_dictionary 167개 초기 데이터
 - [x] subscription_plans 테이블
-- [ ] Supabase Edge Function (openai-proxy) NexusFlow 연동 확인
-- [ ] Android 권한 설정 완료
+- [ ] Supabase Edge Function (openai-proxy) NexusFlow 연동 확인 — 실기기 E2E 필요
+- [ ] Android 권한 설정 완료 — 메인 매니페스트 INTERNET/POST_NOTIFICATIONS/READ_MEDIA_IMAGES 추가 완료(2026-10-04), NotificationListenerService 선언은 네이티브 구현 후
 - [ ] 앱 서명 설정
 
 ### 런칭
@@ -309,4 +306,4 @@ services/                 감지 서비스
 
 ---
 
-_마지막 업데이트: 2026-05-19_
+_마지막 업데이트: 2026-10-04 (1차 배포 체크리스트 화면/핵심기능 대부분 완료 — 남은 것: 네이티브 감지 핸들러, Edge Function E2E, 앱 서명, 런칭)_

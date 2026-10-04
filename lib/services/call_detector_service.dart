@@ -1,4 +1,3 @@
-class CallDetectorService {
 // 통화 종료 감지 서비스 - 통화 후 녹음 파일 분석 연결
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -87,4 +86,3 @@ class CallEndedEvent {
 final callDetectorProvider = Provider<CallDetectorService>((ref) {
   return CallDetectorService.instance;
 });
-}

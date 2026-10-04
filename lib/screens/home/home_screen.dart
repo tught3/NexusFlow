@@ -5,19 +5,22 @@ import 'widgets/priority_card.dart';
 import 'widgets/schedule_zone.dart';
 import 'widgets/insight_zone.dart';
 
+import 'package:nexusflow/providers/home_provider.dart';
+
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final summary = ref.watch(homeSummaryProvider);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () async {
-            // TODO: 전체 새로고침
-          },
+          onRefresh: () => ref.refresh(homeSummaryProvider.future),
           child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               // 상단 앱바
               SliverAppBar(
@@ -47,13 +50,13 @@ class HomeScreen extends ConsumerWidget {
               ),
 
               // ZONE 1: 오늘 브리핑
-              const SliverToBoxAdapter(child: BriefingZone()),
+              SliverToBoxAdapter(child: BriefingZone(summary: summary)),
 
               // ZONE 2: 우선순위 카드 (가로 스와이프)
-              const SliverToBoxAdapter(
+              SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.only(top: 16),
-                  child: PriorityCardZone(),
+                  child: PriorityCardZone(summary: summary),
                 ),
               ),
 
@@ -66,10 +69,10 @@ class HomeScreen extends ConsumerWidget {
               ),
 
               // ZONE 4: 최근 인사이트
-              const SliverToBoxAdapter(
+              SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.only(top: 16, bottom: 100),
-                  child: InsightZone(),
+                  child: InsightZone(summary: summary),
                 ),
               ),
             ],
