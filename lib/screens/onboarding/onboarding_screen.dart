@@ -14,7 +14,8 @@ class OnboardingScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: _kBackground,
       body: SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: SingleChildScrollView(
@@ -23,18 +24,21 @@ class OnboardingScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 24),
-                  Container(
-                    width: 56,
-                    height: 56,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: _kPrimary,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(
-                      Icons.hub_rounded,
-                      color: Colors.white,
-                      size: 30,
+                  // stretch Column 안에서 56x56 박스가 전체폭으로 늘어나지 않게 중앙 정렬
+                  Center(
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: _kPrimary,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.hub_rounded,
+                        color: Colors.white,
+                        size: 30,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),

@@ -94,6 +94,11 @@ class _ConsentScreenState extends ConsumerState<ConsentScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(kOnboardingConsentsKey, enabledIds);
+      // 감지 플래그도 영구 저장 — 재시작 후 detectFlagsInitProvider가 복원한다.
+      await prefs.setBool(kDetectScreenshotKey, enabledIds.contains('screenshot'));
+      await prefs.setBool(kDetectSmsKey, enabledIds.contains('sms'));
+      await prefs.setBool(kDetectCallKey, enabledIds.contains('call'));
+      await prefs.setBool(kDetectKakaoKey, enabledIds.contains('kakao'));
     } catch (error) {
       debugPrint('온보딩 동의 저장 실패: $error');
     }
@@ -106,7 +111,8 @@ class _ConsentScreenState extends ConsumerState<ConsentScreen> {
     return Scaffold(
       backgroundColor: _kBackground,
       body: SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: SingleChildScrollView(

@@ -1,3 +1,4 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,27 +36,31 @@ const List<_ImportOption> _options = [
   ),
 ];
 
-class ImportScreen extends StatelessWidget {
+class ImportScreen extends ConsumerWidget {
   const ImportScreen({super.key});
 
-  Future<void> _start(BuildContext context) async {
+  Future<void> _start(BuildContext context, WidgetRef ref) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(kOnboardingCompletedKey, true);
     } catch (error) {
       debugPrint('온보딩 완료 저장 실패: $error');
     }
+    // FutureProvider 캐시(false)를 갱신하지 않으면 redirect가 같은 실행 내에서
+    // 계속 /onboarding으로 되보내 온보딩 루프에 빠진다.
+    ref.invalidate(onboardingCompletedProvider);
     if (!context.mounted) return;
     // 완료 플래그 저장 후 이동 — 라우터 redirect가 상태에 맞는 화면으로 보낸다.
     context.go('/home');
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       backgroundColor: _kBackground,
       body: SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: SingleChildScrollView(
@@ -88,7 +93,7 @@ class ImportScreen extends StatelessWidget {
                   ],
                   const SizedBox(height: 20),
                   FilledButton(
-                    onPressed: () => _start(context),
+                    onPressed: () => _start(context, ref),
                     style: FilledButton.styleFrom(
                       backgroundColor: _kPrimary,
                       foregroundColor: Colors.white,

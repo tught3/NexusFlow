@@ -24,7 +24,9 @@ class ShellScreen extends ConsumerWidget {
 
     return Scaffold(
       body: child,
-      floatingActionButton: const NexusflowFab(),
+      // 기록 화면은 자체 CTA(AI 분석 시작)와 겹치므로 전역 FAB를 숨긴다.
+      floatingActionButton:
+          location.startsWith('/record') ? null : const NexusflowFab(),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: NavigationBar(
         selectedIndex: currentIndex,

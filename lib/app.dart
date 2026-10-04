@@ -224,18 +224,12 @@ class _NexusFlowAppState extends ConsumerState<NexusFlowApp> {
 
     return MaterialApp.router(
       title: 'NexusFlow',
+      // 1차 배포는 라이트 고정 — 다크테마를 켜면 하드코딩 라이트 배경 화면들과
+      // 칩/스위치 색이 어긋나고 홈 콘텐츠가 시스템 다크 모드에서 판독 불가가 된다.
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF2563EB),
           brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        fontFamily: 'Pretendard',
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2563EB),
-          brightness: Brightness.dark,
         ),
         useMaterial3: true,
         fontFamily: 'Pretendard',

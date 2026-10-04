@@ -41,7 +41,8 @@ class _ModeSelectScreenState extends ConsumerState<ModeSelectScreen> {
     return Scaffold(
       backgroundColor: _kBackground,
       body: SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: SingleChildScrollView(
