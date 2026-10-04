@@ -13,6 +13,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications 요구사항 — java.time 등 java8+ API를
+        // minSdk < 26 기기에서 사용 가능하게 하는 desugaring
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -37,6 +40,10 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 flutter {
