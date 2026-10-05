@@ -25,7 +25,6 @@ class InsightEngine {
 
   Future<List<InsightResult>> _checkFollowUpDelays() async {
     final overdueItems = await supabase
-        .schema('nexusflow')
         .from('action_items')
         .select('id, content, due_date, account_id')
         .eq('user_id', userId)
@@ -41,7 +40,6 @@ class InsightEngine {
 
   Future<List<InsightResult>> _checkOpportunitySignals() async {
     final signals = await supabase
-        .schema('nexusflow')
         .from('active_signals')
         .select('account_id, signal_content')
         .eq('user_id', userId)
@@ -57,7 +55,6 @@ class InsightEngine {
 
   Future<List<InsightResult>> _checkRiskSignals() async {
     final signals = await supabase
-        .schema('nexusflow')
         .from('active_signals')
         .select('account_id, signal_content')
         .eq('user_id', userId)
@@ -74,7 +71,6 @@ class InsightEngine {
   Future<List<InsightResult>> _checkLongNoContact() async {
     final cutoff = DateTime.now().subtract(const Duration(days: 30));
     final accounts = await supabase
-        .schema('nexusflow')
         .from('accounts')
         .select('id, name, last_contacted_at')
         .eq('user_id', userId)
@@ -95,7 +91,6 @@ class InsightEngine {
   Future<List<InsightResult>> _checkVisitTiming() async {
     final today = DateTime.now().weekday;
     final slots = await supabase
-        .schema('nexusflow')
         .from('contact_availability_slots')
         .select('contact_id, time_slot')
         .eq('day_of_week', today)
@@ -111,7 +106,6 @@ class InsightEngine {
   Future<List<InsightResult>> _filterSuppressed(
       List<InsightResult> insights) async {
     final suppressed = await supabase
-        .schema('nexusflow')
         .from('insights')
         .select('content')
         .eq('user_id', userId)
@@ -126,7 +120,6 @@ class InsightEngine {
 
   Future<void> _saveInsight(InsightResult insight) async {
     final existing = await supabase
-        .schema('nexusflow')
         .from('insights')
         .select('id')
         .eq('user_id', userId)
@@ -137,7 +130,7 @@ class InsightEngine {
                 .toIso8601String())
         .maybeSingle();
     if (existing != null) return;
-    await supabase.schema('nexusflow').from('insights').insert({
+    await supabase.from('insights').insert({
       'user_id': userId,
       'account_id': insight.accountId,
       'insight_type': insight.insightType,

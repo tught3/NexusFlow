@@ -26,7 +26,6 @@ class AccountRepository {
     final uid = userId;
     if (uid == null) throw StateError('로그인이 필요합니다');
     await supabase
-        .schema('nexusflow')
         .from('action_items')
         .update({'status': status})
         .eq('id', actionItemId)
@@ -61,7 +60,6 @@ final accountsProvider =
 
   final supabase = ref.watch(supabaseProvider);
   final rows = await supabase
-      .schema('nexusflow')
       .from('accounts')
       .select(
           'id,name,industry_mode,health_score,health_grade,health_updated_at')
@@ -98,7 +96,6 @@ final accountDetailProvider =
 
   final supabase = ref.watch(supabaseProvider);
   final account = await supabase
-      .schema('nexusflow')
       .from('accounts')
       .select()
       .eq('id', accountId)
@@ -107,14 +104,12 @@ final accountDetailProvider =
   if (account == null) throw StateError('거래처를 찾을 수 없습니다');
 
   final contacts = await _safeRows(() => supabase
-      .schema('nexusflow')
       .from('contacts')
       .select('id,name,role')
       .eq('account_id', accountId)
       .eq('user_id', userId)
       .order('name'));
   final interactionEvents = await _safeRows(() => supabase
-      .schema('nexusflow')
       .from('interaction_events')
       .select()
       .eq('account_id', accountId)
@@ -122,21 +117,18 @@ final accountDetailProvider =
       .order('occurred_at', ascending: false)
       .limit(50));
   final actionItems = await _safeRows(() => supabase
-      .schema('nexusflow')
       .from('action_items')
       .select()
       .eq('account_id', accountId)
       .eq('user_id', userId)
       .order('status'));
   final activeSignals = await _safeRows(() => supabase
-      .schema('nexusflow')
       .from('active_signals')
       .select('id,signal_type,signal_content')
       .eq('account_id', accountId)
       .eq('user_id', userId)
       .eq('is_active', true));
   final memories = await _safeRows(() => supabase
-      .schema('nexusflow')
       .from('confirmed_memories')
       .select()
       .eq('account_id', accountId)
@@ -178,7 +170,6 @@ final contactDetailProvider =
 
   final supabase = ref.watch(supabaseProvider);
   final contact = await supabase
-      .schema('nexusflow')
       .from('contacts')
       .select()
       .eq('id', contactId)
@@ -193,14 +184,12 @@ final contactDetailProvider =
   Map<String, dynamic>? account;
   if (accountId != null && accountId.isNotEmpty) {
     account = await _safeSingle(() => supabase
-        .schema('nexusflow')
         .from('accounts')
         .select('id,name,industry_mode')
         .eq('id', accountId)
         .eq('user_id', userId)
         .maybeSingle());
     events = await _safeRows(() => supabase
-        .schema('nexusflow')
         .from('interaction_events')
         .select()
         .eq('account_id', accountId)
@@ -209,7 +198,6 @@ final contactDetailProvider =
         .limit(50));
     try {
       final byContact = await supabase
-          .schema('nexusflow')
           .from('interaction_events')
           .select()
           .eq('contact_id', contactId)
@@ -223,7 +211,6 @@ final contactDetailProvider =
   }
 
   final availabilitySlots = await _safeRows(() => supabase
-      .schema('nexusflow')
       .from('contact_availability_slots')
       .select()
       .eq('contact_id', contactId)

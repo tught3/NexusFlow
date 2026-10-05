@@ -31,7 +31,7 @@ class HealthScoreService {
         reliability + continuity + opportunity;
     final grade = _gradeFromScore(total);
 
-    await supabase.schema('nexusflow').from('accounts').update({
+    await supabase.from('accounts').update({
       'health_score': total,
       'health_grade': grade,
       'health_contact_score': contactFrequency,
@@ -57,7 +57,6 @@ class HealthScoreService {
 
   Future<void> recalculateAll() async {
     final accounts = await supabase
-        .schema('nexusflow')
         .from('accounts')
         .select('id')
         .eq('user_id', userId);
@@ -71,7 +70,6 @@ class HealthScoreService {
     required DateTime since,
   }) async {
     final result = await supabase
-        .schema('nexusflow')
         .from('interaction_events')
         .select('id')
         .eq('account_id', accountId)
@@ -86,7 +84,6 @@ class HealthScoreService {
 
   Future<int> _calcResponseQuality({required String accountId}) async {
     final signals = await supabase
-        .schema('nexusflow')
         .from('active_signals')
         .select('signal_type')
         .eq('account_id', accountId)
@@ -103,7 +100,6 @@ class HealthScoreService {
 
   Future<int> _calcReliability({required String accountId}) async {
     final allItems = await supabase
-        .schema('nexusflow')
         .from('action_items')
         .select('status')
         .eq('account_id', accountId)
@@ -118,7 +114,6 @@ class HealthScoreService {
 
   Future<int> _calcContinuity({required String accountId}) async {
     final account = await supabase
-        .schema('nexusflow')
         .from('accounts')
         .select('created_at')
         .eq('id', accountId)
@@ -132,7 +127,6 @@ class HealthScoreService {
 
   Future<int> _calcOpportunity({required String accountId}) async {
     final opportunities = await supabase
-        .schema('nexusflow')
         .from('active_signals')
         .select('id')
         .eq('account_id', accountId)
@@ -141,7 +135,6 @@ class HealthScoreService {
         .eq('is_active', true);
     if ((opportunities as List).isNotEmpty) return _opportunityMax;
     final risks = await supabase
-        .schema('nexusflow')
         .from('active_signals')
         .select('id')
         .eq('account_id', accountId)

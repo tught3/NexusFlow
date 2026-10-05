@@ -6,7 +6,7 @@ class SupabaseConfig {
   static SupabaseClient get client => Supabase.instance.client;
 
   static dynamic nexusflow(String table) =>
-      client.schema('nexusflow').from(table);
+      client.from(table);
 
   static dynamic planflow(String table) =>
       client.schema('planflow').from(table);

@@ -492,7 +492,6 @@ class DetectionOrchestrator {
           candidate == null ? 'id,name' : 'id,name,$candidate';
       try {
         final rows = await client
-            .schema('nexusflow')
             .from('contacts')
             .select(select)
             .eq('user_id', userId);
@@ -505,7 +504,6 @@ class DetectionOrchestrator {
     List<Map<String, dynamic>> accountRows = [];
     try {
       final rows = await client
-          .schema('nexusflow')
           .from('accounts')
           .select('id,name')
           .eq('user_id', userId);

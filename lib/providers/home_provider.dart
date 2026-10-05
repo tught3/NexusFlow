@@ -41,7 +41,7 @@ final homeSummaryProvider = FutureProvider<HomeSummary>((ref) async {
   ref.watch(refreshAccountDataProvider);
   if (userId == null) return HomeSummary.empty;
 
-  final schema = ref.watch(supabaseProvider).schema('nexusflow');
+  final schema = ref.watch(supabaseProvider);
 
   // 거래처 (last_interaction_at 컬럼 미확정 → 축소 선택 재시도)
   List<Map<String, dynamic>> accountRows;

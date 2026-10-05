@@ -27,7 +27,6 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
 
   Future<void> _loadExtraction() async {
     final result = await Supabase.instance.client
-        .schema('nexusflow')
         .from('ai_extractions')
         .select('extracted_data, confidence_score')
         .eq('id', widget.extractionId)
@@ -41,7 +40,6 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
   Future<void> _save() async {
     setState(() => _isSaving = true);
     await Supabase.instance.client
-        .schema('nexusflow')
         .from('ai_extractions')
         .update({'status': 'confirmed'})
         .eq('id', widget.extractionId);
@@ -55,7 +53,6 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
 
   Future<void> _dismiss() async {
     await Supabase.instance.client
-        .schema('nexusflow')
         .from('ai_extractions')
         .update({'status': 'rejected'})
         .eq('id', widget.extractionId);

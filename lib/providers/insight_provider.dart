@@ -16,7 +16,6 @@ final insightsProvider =
 
   final supabase = ref.watch(supabaseProvider);
   final rows = await supabase
-      .schema('nexusflow')
       .from('insights')
       .select(
           'id,account_id,insight_type,content,status,priority_score,created_at')
@@ -50,7 +49,6 @@ final insightDetailProvider =
 
   final supabase = ref.watch(supabaseProvider);
   final row = await supabase
-      .schema('nexusflow')
       .from('insights')
       .select(
           'id,account_id,insight_type,content,status,priority_score,created_at')
@@ -64,7 +62,6 @@ final insightDetailProvider =
   if (accountId != null && accountId.isNotEmpty) {
     try {
       final account = await supabase
-          .schema('nexusflow')
           .from('accounts')
           .select('name')
           .eq('id', accountId)
@@ -92,7 +89,6 @@ class InsightRepository {
     final uid = userId;
     if (uid == null) throw StateError('로그인이 필요합니다');
     await supabase
-        .schema('nexusflow')
         .from('insights')
         .update({
           'suppressed_until': DateTime.now()
@@ -113,7 +109,6 @@ class InsightRepository {
     if (uid == null) throw StateError('로그인이 필요합니다');
     try {
       await supabase
-          .schema('nexusflow')
           .from('insight_feedback')
           .insert({
             'user_id': uid,
@@ -124,7 +119,6 @@ class InsightRepository {
       debugPrint('insight_feedback insert failed: $e');
     }
     await supabase
-        .schema('nexusflow')
         .from('insights')
         .update({'status': 'reviewed'})
         .eq('id', insightId)

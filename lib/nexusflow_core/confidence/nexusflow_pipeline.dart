@@ -108,7 +108,7 @@ class NexusflowPipeline {
     required NexusflowInputSource source,
   }) async {
     final result = await supabase
-        .from('nexusflow.raw_sources')
+        .from('raw_sources')
         .insert({
           'user_id': userId,
           'source_type': source.name,
@@ -155,7 +155,6 @@ class NexusflowPipeline {
   /// STEP 4. Dictionary 로드
   Future<List<Map<String, dynamic>>> _loadDictionary() async {
     final result = await supabase
-        .schema('nexusflow')
         .from('term_dictionary')
         .select('term, meaning, dict_scope')
         .or('industry_mode.eq.$industryMode,industry_mode.eq.general')
@@ -182,7 +181,6 @@ class NexusflowPipeline {
   /// STEP 5. 기존 거래처 로드
   Future<List<Map<String, dynamic>>> _loadAccounts() async {
     final result = await supabase
-        .schema('nexusflow')
         .from('accounts')
         .select('id, name')
         .eq('user_id', userId)
@@ -193,7 +191,6 @@ class NexusflowPipeline {
   /// STEP 5. 기존 담당자 로드
   Future<List<Map<String, dynamic>>> _loadContacts() async {
     final result = await supabase
-        .schema('nexusflow')
         .from('contacts')
         .select('id, name, role')
         .eq('user_id', userId)
@@ -296,7 +293,6 @@ class NexusflowPipeline {
     final schedule = extracted['schedule'];
 
     final result = await supabase
-        .schema('nexusflow')
         .from('ai_extractions')
         .insert({
           'raw_source_id': rawSourceId,
@@ -347,7 +343,7 @@ class NexusflowPipeline {
 
     // 인터랙션 이벤트 저장
     if (accountId != null) {
-      await supabase.schema('nexusflow').from('interaction_events').insert({
+      await supabase.from('interaction_events').insert({
         'user_id': userId,
         'account_id': accountId,
         'event_type': 'note',
@@ -357,7 +353,7 @@ class NexusflowPipeline {
 
       // last_contacted_at 갱신 — InsightEngine._checkLongNoContact가 이 컬럼으로
       // 30일 무접촉을 판정하므로, 인터랙션 발생 시점에 반드시 최신화한다.
-      await supabase.schema('nexusflow').from('accounts').update({
+      await supabase.from('accounts').update({
         'last_contacted_at': DateTime.now().toIso8601String(),
       }).eq('id', accountId).eq('user_id', userId);
     }
@@ -367,7 +363,7 @@ class NexusflowPipeline {
     if (actionItems is List && accountId != null) {
       for (final item in actionItems) {
         if (item is Map<String, dynamic>) {
-          await supabase.schema('nexusflow').from('action_items').insert({
+          await supabase.from('action_items').insert({
             'user_id': userId,
             'account_id': accountId,
             'content': item['content']?.toString() ?? '',
@@ -383,7 +379,7 @@ class NexusflowPipeline {
     if (signals is List && accountId != null) {
       for (final signal in signals) {
         if (signal is Map<String, dynamic>) {
-          await supabase.schema('nexusflow').from('active_signals').insert({
+          await supabase.from('active_signals').insert({
             'user_id': userId,
             'account_id': accountId,
             'signal_type': signal['type']?.toString() ?? 'opportunity',
@@ -446,7 +442,7 @@ class NexusflowPipeline {
 
   /// STEP 11b. MID/LOW → 검수 대기열 등록
   Future<void> _enqueueValidation({required String extractionId}) async {
-    await supabase.schema('nexusflow').from('validation_queue').insert({
+    await supabase.from('validation_queue').insert({
       'user_id': userId,
       'extraction_id': extractionId,
       'queue_status': 'pending',
@@ -457,7 +453,6 @@ class NexusflowPipeline {
   Future<String> _upsertAccount(String name) async {
     if (name.isEmpty) return '';
     final existing = await supabase
-        .schema('nexusflow')
         .from('accounts')
         .select('id')
         .eq('user_id', userId)
@@ -467,7 +462,6 @@ class NexusflowPipeline {
     if (existing != null) return existing['id'] as String;
 
     final result = await supabase
-        .schema('nexusflow')
         .from('accounts')
         .insert({
           'user_id': userId,
@@ -487,7 +481,6 @@ class NexusflowPipeline {
   }) async {
     if (name.isEmpty) return;
     final existing = await supabase
-        .schema('nexusflow')
         .from('contacts')
         .select('id')
         .eq('user_id', userId)
@@ -497,7 +490,7 @@ class NexusflowPipeline {
 
     if (existing != null) return;
 
-    await supabase.schema('nexusflow').from('contacts').insert({
+    await supabase.from('contacts').insert({
       'user_id': userId,
       'account_id': accountId,
       'name': name,

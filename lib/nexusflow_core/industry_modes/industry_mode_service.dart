@@ -43,7 +43,6 @@ class IndustryModeService {
   /// 업종별 Dictionary 로드
   Future<List<Map<String, dynamic>>> loadDictionary(String mode) async {
     final result = await supabase
-        .schema('nexusflow')
         .from('term_dictionary')
         .select('term, meaning, dict_scope')
         .or('industry_mode.eq.$mode,industry_mode.eq.general')
@@ -55,7 +54,6 @@ class IndustryModeService {
   /// 업종별 Quick Actions 로드
   Future<List<Map<String, dynamic>>> loadQuickActions(String mode) async {
     final result = await supabase
-        .schema('nexusflow')
         .from('quick_actions')
         .select('label, action_type')
         .or('industry_mode.eq.$mode,industry_mode.eq.general')
@@ -66,7 +64,6 @@ class IndustryModeService {
   /// 사용자 업종 모드 저장
   Future<void> saveUserMode(String mode) async {
     await supabase
-        .schema('nexusflow')
         .from('industry_modes')
         .upsert({
           'user_id': userId,
@@ -78,7 +75,6 @@ class IndustryModeService {
   /// 사용자 업종 모드 로드
   Future<String> loadUserMode() async {
     final result = await supabase
-        .schema('nexusflow')
         .from('industry_modes')
         .select('mode_type')
         .eq('user_id', userId)
@@ -95,7 +91,6 @@ class IndustryModeService {
   }) async {
     // 기존 learned 항목 확인
     final existing = await supabase
-        .schema('nexusflow')
         .from('term_dictionary')
         .select('id, confidence_count, dict_scope')
         .eq('user_id', userId)
@@ -104,7 +99,7 @@ class IndustryModeService {
 
     if (existing == null) {
       // 신규 learned 항목 생성
-      await supabase.schema('nexusflow').from('term_dictionary').insert({
+      await supabase.from('term_dictionary').insert({
         'user_id': userId,
         'industry_mode': mode,
         'term': term,
@@ -125,7 +120,6 @@ class IndustryModeService {
       if (count == 3) updates['promoted_from'] = 'learned';
 
       await supabase
-          .schema('nexusflow')
           .from('term_dictionary')
           .update(updates)
           .eq('id', existing['id']);
@@ -150,7 +144,6 @@ class IndustryModeService {
     required int confirmedCount,
   }) async {
     final existing = await supabase
-        .schema('nexusflow')
         .from('shared_learning_patterns')
         .select('id, confirmed_count')
         .eq('user_id', userId)
@@ -159,7 +152,6 @@ class IndustryModeService {
 
     if (existing == null) {
       await supabase
-          .schema('nexusflow')
           .from('shared_learning_patterns')
           .insert({
         'user_id': userId,
@@ -170,7 +162,6 @@ class IndustryModeService {
       });
     } else if ((existing['confirmed_count'] as int? ?? 0) < confirmedCount) {
       await supabase
-          .schema('nexusflow')
           .from('shared_learning_patterns')
           .update({'confirmed_count': confirmedCount})
           .eq('id', existing['id']);

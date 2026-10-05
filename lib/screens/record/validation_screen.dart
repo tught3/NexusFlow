@@ -32,7 +32,6 @@ class _ValidationScreenState extends ConsumerState<ValidationScreen> {
 
   Future<void> _loadExtraction() async {
     final result = await Supabase.instance.client
-        .schema('nexusflow')
         .from('ai_extractions')
         .select('extracted_data, confidence_score, confidence_level')
         .eq('id', widget.extractionId)
@@ -55,7 +54,6 @@ class _ValidationScreenState extends ConsumerState<ValidationScreen> {
     setState(() => _isSaving = true);
 
     await Supabase.instance.client
-        .schema('nexusflow')
         .from('ai_extractions')
         .update({
           'extracted_data': jsonEncode(_editedData),
@@ -64,7 +62,6 @@ class _ValidationScreenState extends ConsumerState<ValidationScreen> {
         .eq('id', widget.extractionId);
 
     await Supabase.instance.client
-        .schema('nexusflow')
         .from('validation_queue')
         .update({'queue_status': 'resolved', 'resolved_at': DateTime.now().toIso8601String()})
         .eq('extraction_id', widget.extractionId);

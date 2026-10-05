@@ -29,7 +29,7 @@ class SecureVaultService {
     final encrypted = _encrypt(value, keyHint);
 
     // Supabase에 암호화된 값 저장
-    await supabase.schema('nexusflow').from('contact_secure_vault').upsert({
+    await supabase.from('contact_secure_vault').upsert({
       'contact_id': contactId,
       'data_type': dataType.name,
       'encrypted_value': encrypted,
@@ -51,7 +51,6 @@ class SecureVaultService {
   }) async {
     try {
       final result = await supabase
-          .schema('nexusflow')
           .from('contact_secure_vault')
           .select('encrypted_value, encryption_key_hint')
           .eq('contact_id', contactId)
@@ -92,7 +91,6 @@ class SecureVaultService {
     required VaultDataType dataType,
   }) async {
     await supabase
-        .schema('nexusflow')
         .from('contact_secure_vault')
         .delete()
         .eq('contact_id', contactId)
