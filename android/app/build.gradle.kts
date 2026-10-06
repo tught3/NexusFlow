@@ -60,11 +60,18 @@ android {
                 signingConfigs.getByName("release")
             else
                 signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
 
 dependencies {
+    // R8(minify)이 google_mlkit_text_recognition의 한국어 인식기 클래스를 요구 —
+    // OcrService가 TextRecognitionScript.korean을 사용하므로 정식 의존성 필요
+    implementation("com.google.mlkit:text-recognition-korean:16.0.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
